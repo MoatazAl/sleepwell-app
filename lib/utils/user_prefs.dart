@@ -2,33 +2,37 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class UserPrefs {
-  static const _keyName = "user_name";
-  static const _keyEmail = "user_email";
-  static const _keyPhoto = "user_photo";
-
-  /// Save user info (name, email, photo)
+  // 🔹 Save user info
   static Future<void> saveUserInfo(User user) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyName, user.displayName ?? "");
-    await prefs.setString(_keyEmail, user.email ?? "");
-    await prefs.setString(_keyPhoto, user.photoURL ?? "");
+    await prefs.setString('name', user.displayName ?? '');
+    await prefs.setString('email', user.email ?? '');
+    await prefs.setString('photo', user.photoURL ?? '');
   }
 
-  /// Get last saved user info
+  // 🔹 Save login provider (email or google)
+  static Future<void> setProvider(String provider) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('provider', provider);
+  }
+
+  // 🔹 Load last user info
   static Future<Map<String, String?>> getLastUserInfo() async {
     final prefs = await SharedPreferences.getInstance();
     return {
-      "name": prefs.getString(_keyName),
-      "email": prefs.getString(_keyEmail),
-      "photo": prefs.getString(_keyPhoto),
+      "name": prefs.getString('name'),
+      "email": prefs.getString('email'),
+      "photo": prefs.getString('photo'),
+      "provider": prefs.getString('provider'),
     };
   }
 
-  /// Clear saved user info
+  // 🔹 Clear all user data (e.g. on logout)
   static Future<void> clearUserInfo() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_keyName);
-    await prefs.remove(_keyEmail);
-    await prefs.remove(_keyPhoto);
+    await prefs.remove('name');
+    await prefs.remove('email');
+    await prefs.remove('photo');
+    await prefs.remove('provider');
   }
 }
