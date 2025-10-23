@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../home/home_screen.dart';
 import 'signup_screen.dart';
@@ -18,67 +19,112 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _passwordFocus = FocusNode();
+
   bool _loading = false;
   bool _obscurePassword = true;
-
-  Map<String, String?>? _lastUser;
+  bool _rememberMe = true;
 
   @override
   void initState() {
     super.initState();
-    _loadLastUser();
+    _loadSavedCredentials();
   }
 
-  Future<void> _loadLastUser() async {
-    final userInfo = await UserPrefs.getLastUserInfo();
-    if (userInfo["email"] != null && userInfo["email"]!.isNotEmpty) {
-      setState(() => _lastUser = userInfo);
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    _passwordFocus.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadSavedCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    _emailController.text = prefs.getString('email') ?? '';
+    _passwordController.text = prefs.getString('password') ?? '';
+  }
+
+  Future<void> _saveCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (_rememberMe) {
+      await prefs.setString('email', _emailController.text.trim());
+      await prefs.setString('password', _passwordController.text.trim());
+    } else {
+      await prefs.remove('email');
+      await prefs.remove('password');
     }
   }
 
-  // 🔹 Email login
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
 
     try {
+      await FirebaseAuth.instance.setPersistence(
+        _rememberMe ? Persistence.LOCAL : Persistence.SESSION,
+      );
+
       final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
 
+      await _saveCredentials();
       await UserPrefs.saveUserInfo(cred.user!);
       await UserPrefs.setProvider("email");
 
+      if (!mounted) return;
       _goHome();
     } on FirebaseAuthException catch (e) {
-      _showError(e.message ?? "Login failed");
+      _showError(_mapError(e.code));
+    } catch (e) {
+      _showError("Unexpected error: $e");
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
-  // 🔹 Google login
+  String _mapError(String code) {
+    switch (code) {
+      case 'user-not-found':
+        return 'No account found for this email.';
+      case 'wrong-password':
+        return 'Incorrect password.';
+      case 'invalid-email':
+        return 'Invalid email format.';
+      default:
+        return 'Login failed. Please check your details.';
+    }
+  }
+
   Future<void> _loginWithGoogle() async {
     try {
+      await FirebaseAuth.instance.setPersistence(
+        _rememberMe ? Persistence.LOCAL : Persistence.SESSION,
+      );
+
       if (kIsWeb) {
+        // ✅ Web login
         final googleProvider = GoogleAuthProvider()
           ..addScope('email')
           ..addScope('profile');
 
-        final cred =
-            await FirebaseAuth.instance.signInWithPopup(googleProvider);
-
+        final cred = await FirebaseAuth.instance.signInWithPopup(googleProvider);
         await UserPrefs.saveUserInfo(cred.user!);
         await UserPrefs.setProvider("google");
-
+        if (!mounted) return;
         _goHome();
       } else {
-        final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
-        if (googleUser == null) return; // User canceled
+        // ✅ Mobile login - FIXED: Use the correct constructor
+        final googleSignIn = GoogleSignIn(
+          scopes: ['email', 'profile'],
+        );
 
-        final GoogleSignInAuthentication googleAuth =
-            await googleUser.authentication;
+        final googleUser = await googleSignIn.signIn();
+        if (googleUser == null) return; // user canceled
+
+        final googleAuth = await googleUser.authentication;
 
         final credential = GoogleAuthProvider.credential(
           accessToken: googleAuth.accessToken,
@@ -90,11 +136,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
         await UserPrefs.saveUserInfo(userCred.user!);
         await UserPrefs.setProvider("google");
-
+        if (!mounted) return;
         _goHome();
       }
-    } catch (e, st) {
-      debugPrint("❌ Google login failed: $e\n$st");
+    } catch (e) {
       _showError("Google login failed: $e");
     }
   }
@@ -110,132 +155,99 @@ class _LoginScreenState extends State<LoginScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
-Widget _buildCachedUserAvatar(Map<String, String?> user) {
-  final photo = user["photo"];
-  final name = user["name"];
-  final hasPhoto = photo != null && photo.isNotEmpty;
-
-  if (hasPhoto) {
-    return CircleAvatar(
-      backgroundImage: NetworkImage(photo),
-      backgroundColor: Colors.grey.shade300,
-      onBackgroundImageError: (_, __) {
-        debugPrint("⚠️ Cached photo failed to load, showing initials.");
-      },
-    );
-  } else {
-    final initials = (name?.isNotEmpty == true ? name![0] : "U").toUpperCase();
-    return CircleAvatar(
-      backgroundColor: Colors.grey.shade300,
-      child: Text(
-        initials,
-        style: const TextStyle(
-          fontSize: 20,
-          fontWeight: FontWeight.bold,
-          color: Colors.black87,
-        ),
-      ),
-    );
-  }
-}
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[100],
       body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Card(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            elevation: 6,
-            child: Padding(
-              padding: const EdgeInsets.all(20),
+        child: Card(
+          elevation: 8,
+          margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 60),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Form(
+              key: _formKey,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Text(
-                    "Welcome Back 👋",
-                    style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+                    "Welcome to SleepWell",
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 24),
 
-                  // 🔹 Show cached user only if last login was Google
-                  if (_lastUser != null &&
-                      _lastUser!["provider"] == "google") ...[
-                    ListTile(
-                      leading: _buildCachedUserAvatar(_lastUser!),
-                      title: Text("Continue as ${_lastUser!["name"]}"),
-                      subtitle: Text(_lastUser!["email"] ?? ""),
-                      onTap: _loginWithGoogle,
+                  // Email
+                  TextFormField(
+                    controller: _emailController,
+                    textInputAction: TextInputAction.next,
+                    onFieldSubmitted: (_) =>
+                        FocusScope.of(context).requestFocus(_passwordFocus),
+                    decoration: InputDecoration(
+                      labelText: "Email",
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
-                    const Divider(),
-                    const Text("Or use another account"),
-                  ],
-
-                  // 🔹 Email login
-                  Form(
-                    key: _formKey,
-                    child: Column(
-                      children: [
-                        _buildTextField(_emailController, "Email"),
-                        const SizedBox(height: 16),
-
-                        // Password with show/hide + enter key login
-                        TextFormField(
-                          controller: _passwordController,
-                          obscureText: _obscurePassword,
-                          textInputAction: TextInputAction.done,
-                          onFieldSubmitted: (_) => _login(),
-                          decoration: InputDecoration(
-                            labelText: "Password",
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            suffixIcon: IconButton(
-                              icon: Icon(_obscurePassword
-                                  ? Icons.visibility_off
-                                  : Icons.visibility),
-                              onPressed: () {
-                                setState(() {
-                                  _obscurePassword = !_obscurePassword;
-                                });
-                              },
-                            ),
-                          ),
-                          validator: (v) => v == null || v.isEmpty
-                              ? "Please enter Password"
-                              : null,
-                        ),
-                        const SizedBox(height: 20),
-
-                        _loading
-                            ? const CircularProgressIndicator()
-                            : ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  minimumSize: const Size(double.infinity, 48),
-                                ),
-                                onPressed: _login,
-                                child: const Text("Login"),
-                              ),
-
-                        TextButton(
-                          onPressed: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const SignupScreen(),
-                            ),
-                          ),
-                          child: const Text("Don’t have an account? Sign up"),
-                        ),
-                      ],
-                    ),
+                    validator: (v) =>
+                        v == null || v.isEmpty ? "Enter your email" : null,
                   ),
-                  const Divider(),
+                  const SizedBox(height: 16),
 
-                  // 🔹 Google login button
+                  // Password
+                  TextFormField(
+                    controller: _passwordController,
+                    focusNode: _passwordFocus,
+                    obscureText: _obscurePassword,
+                    textInputAction: TextInputAction.done,
+                    onFieldSubmitted: (_) => _login(),
+                    decoration: InputDecoration(
+                      labelText: "Password",
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscurePassword
+                              ? Icons.visibility_off
+                              : Icons.visibility,
+                        ),
+                        onPressed: () =>
+                            setState(() => _obscurePassword = !_obscurePassword),
+                      ),
+                    ),
+                    validator: (v) =>
+                        v == null || v.isEmpty ? "Enter your password" : null,
+                  ),
+
+                  CheckboxListTile(
+                    value: _rememberMe,
+                    onChanged: (v) => setState(() => _rememberMe = v!),
+                    title: const Text("Remember me"),
+                    controlAffinity: ListTileControlAffinity.leading,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+
+                  const SizedBox(height: 10),
+                  _loading
+                      ? const CircularProgressIndicator()
+                      : ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            minimumSize: const Size(double.infinity, 48),
+                            backgroundColor: const Color(0xff7C4DFF),
+                          ),
+                          onPressed: _login,
+                          child: const Text("Login"),
+                        ),
+
+                  TextButton(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const SignupScreen()),
+                    ),
+                    child: const Text("Don't have an account? Sign up"),
+                  ),
+                  const Divider(height: 30),
                   ElevatedButton.icon(
                     icon: const Icon(Icons.account_circle, size: 28),
                     style: ElevatedButton.styleFrom(
@@ -251,71 +263,6 @@ Widget _buildCachedUserAvatar(Map<String, String?> user) {
           ),
         ),
       ),
-    );
-  }
-
-  // 🔹 Avatar helper for cached users
-  Widget _buildUserAvatar(User? user) {
-  final photoUrl = user?.photoURL;
-  final displayName = user?.displayName?.trim();
-  final email = user?.email?.trim();
-
-  // Safely get first initial — fallback to first letter of email or "U"
-  final initials = (displayName?.isNotEmpty == true
-          ? displayName![0]
-          : (email?.isNotEmpty == true ? email![0] : "U"))
-      .toUpperCase();
-
-  return CircleAvatar(
-    radius: 40,
-    backgroundColor: Colors.grey.shade300,
-    child: photoUrl != null && photoUrl.isNotEmpty
-        ? ClipOval(
-            child: Image.network(
-              photoUrl,
-              width: 80,
-              height: 80,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) {
-                debugPrint("⚠️ Failed to load photo, showing initials.");
-                return Center(
-                  child: Text(
-                    initials,
-                    style: const TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                  ),
-                );
-              },
-            ),
-          )
-        : Text(
-            initials,
-            style: const TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87,
-            ),
-          ),
-  );
-}
-
-
-
-  // 🔹 Simple text field builder
-  Widget _buildTextField(TextEditingController c, String label,
-      {bool obscureText = false}) {
-    return TextFormField(
-      controller: c,
-      obscureText: obscureText,
-      decoration: InputDecoration(
-        labelText: label,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-      ),
-      validator: (v) =>
-          v == null || v.isEmpty ? "Please enter $label" : null,
     );
   }
 }
