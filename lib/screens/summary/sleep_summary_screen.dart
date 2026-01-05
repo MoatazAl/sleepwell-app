@@ -1,10 +1,10 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
-import 'package:fl_chart/fl_chart.dart';
+
 import '../../widgets/app_navbar.dart';
+import '../history/sleep_history_screen.dart';
 import '../../theme.dart';
 
 class SleepSummaryScreen extends StatefulWidget {
@@ -18,418 +18,495 @@ class _SleepSummaryScreenState extends State<SleepSummaryScreen> {
   final _firestore = FirebaseFirestore.instance;
   final _user = FirebaseAuth.instance.currentUser;
 
-  String _currentView = 'Weekly';
-  double totalHours = 0;
-  double averageHours = 0;
-  double longest = 0;
-  double shortest = 0;
-  Map<String, double> dailyHours = {};
-  Map<String, double> monthlyHours = {};
-  int _weekOffset = 0;
+  bool _loading = true;
+
+  // yyyy-MM-dd -> total hours slept that day
+  final Map<String, double> _dailyTotals = {};
+
+  double _avg7 = 0.0;
+  double _avg30 = 0.0;
+  int _daysWithSleep30 = 0;
+
+  late final List<DateTime> _heatmapDays = List.generate(
+    28,
+    (i) => DateTime.now().subtract(Duration(days: 27 - i)),
+  );
 
   @override
   void initState() {
     super.initState();
-    _loadSummary();
+    _loadAnalytics();
   }
 
-  DateTime get _startOfWeek {
-    final now = DateTime.now().add(Duration(days: 7 * _weekOffset));
-    return now.subtract(Duration(days: now.weekday % 7));
-  }
-
-  DateTime get _endOfWeek => _startOfWeek.add(const Duration(days: 7));
-
-  Future<void> _loadSummary() async {
+  Future<void> _loadAnalytics() async {
     if (_user == null) return;
 
-    final snapshot = await _firestore
+    final snap = await _firestore
         .collection('users')
-        .doc(_user.uid)
-        .collection('sleep_sessions')
+        .doc(_user!.uid)
+        .collection('sleep_records')
+        .orderBy('start', descending: true)
+        .limit(90)
         .get();
 
-    if (snapshot.docs.isEmpty) return;
+    _dailyTotals.clear();
 
-    final allDurations = <double>[];
-    final daily = {for (final d in ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']) d: 0.0};
-    final monthly = {
-      for (final m in ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']) m: 0.0
-    };
-
-    for (final doc in snapshot.docs) {
+    for (final doc in snap.docs) {
       final data = doc.data();
-      final start = (data['start'] as Timestamp).toDate();
-      final end = data['end'] == null ? null : (data['end'] as Timestamp).toDate();
-      if (end == null) continue;
+      final start = (data['start'] as Timestamp?)?.toDate();
+      final end = (data['end'] as Timestamp?)?.toDate();
+      if (start == null || end == null || !end.isAfter(start)) continue;
 
-      final durationHr = end.difference(start).inMinutes / 60.0;
-      allDurations.add(durationHr);
-
-      if (start.isAfter(_startOfWeek) && start.isBefore(_endOfWeek)) {
-        final day = DateFormat('E').format(start);
-        daily[day] = (daily[day] ?? 0) + durationHr;
-      }
-
-      final month = DateFormat('MMM').format(start);
-      monthly[month] = (monthly[month] ?? 0) + durationHr;
+      final hours = end.difference(start).inMinutes / 60.0;
+      final key = DateFormat('yyyy-MM-dd').format(start);
+      _dailyTotals[key] = (_dailyTotals[key] ?? 0.0) + hours;
     }
 
-    setState(() {
-      totalHours = allDurations.fold(0, (a, b) => a + b);
-      averageHours = allDurations.isEmpty ? 0 : totalHours / allDurations.length;
-      longest = allDurations.isEmpty ? 0 : allDurations.reduce((a, b) => a > b ? a : b);
-      shortest = allDurations.isEmpty ? 0 : allDurations.reduce((a, b) => a < b ? a : b);
-      dailyHours = daily;
-      monthlyHours = monthly;
-    });
+    _computeAggregates();
+    setState(() => _loading = false);
   }
 
-  String _weekLabel() {
-    final start = DateFormat('MMM d').format(_startOfWeek);
-    final end = DateFormat('MMM d').format(_endOfWeek.subtract(const Duration(days: 1)));
-    return "$start - $end";
+  void _computeAggregates() {
+    final now = DateTime.now();
+
+    double total7 = 0;
+    double total30 = 0;
+    int count7 = 0;
+    int count30 = 0;
+
+    final daysWithSleep = <String>{};
+
+    _dailyTotals.forEach((key, hours) {
+      final date = DateTime.parse(key);
+      final diff = now.difference(date).inDays;
+
+      if (diff >= 0 && diff <= 6) {
+        total7 += hours;
+        count7++;
+      }
+      if (diff >= 0 && diff <= 29) {
+        total30 += hours;
+        count30++;
+        if (hours > 0) daysWithSleep.add(key);
+      }
+    });
+
+    _avg7 = count7 == 0 ? 0.0 : total7 / count7;
+    _avg30 = count30 == 0 ? 0.0 : total30 / count30;
+    _daysWithSleep30 = daysWithSleep.length;
   }
+
+  double _hoursForDate(DateTime d) {
+    final key = DateFormat('yyyy-MM-dd').format(d);
+    return _dailyTotals[key] ?? 0.0;
+  }
+
+  // ========================= UI =========================
 
   @override
   Widget build(BuildContext context) {
-    final weeklyGoal = 56.0;
-    final weekTotal = dailyHours.values.fold(0.0, (a, b) => a + b);
-    final goalProgress = (weekTotal / weeklyGoal).clamp(0.0, 1.0);
-
     return Scaffold(
       appBar: const AppNavBar(current: NavSection.summary),
-      backgroundColor: kSurface,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              CupertinoSegmentedControl<String>(
-                groupValue: _currentView,
-                onValueChanged: (v) => setState(() => _currentView = v),
-                children: const {
-                  'Daily': Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('Daily')),
-                  'Weekly': Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('Weekly')),
-                  'Yearly': Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('Yearly')),
-                },
-              ),
-              const SizedBox(height: 20),
-              if (_currentView == 'Weekly') _buildWeeklyView(goalProgress),
-              if (_currentView == 'Daily') _buildDailyView(),
-              if (_currentView == 'Yearly') _buildYearlyView(),
-            ],
+      backgroundColor: Colors.transparent,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF120022), Color(0xFF050010)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
           ),
+        ),
+        child: SafeArea(
+          child: _loading
+              ? const Center(
+                  child: CircularProgressIndicator(color: kBrand),
+                )
+              : ListView(
+                  padding: const EdgeInsets.all(20),
+                  children: [
+                    const Text(
+                      "Sleep Summary",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 26,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    _buildSleepScoreHero(),
+                    const SizedBox(height: 20),
+
+                    _buildRecentStats(),
+                    const SizedBox(height: 20),
+
+                    _buildRoutineStability(),
+                    const SizedBox(height: 20),
+
+                    _buildHeatmapCard(),
+                    const SizedBox(height: 20),
+
+                    _buildHistoryLink(),
+                  ],
+                ),
         ),
       ),
     );
   }
 
-  // ===================== WEEKLY VIEW =====================
-  Widget _buildWeeklyView(double progress) {
-    return Expanded(
+  // ========================= CARDS =========================
+
+  Widget _glassCard({required Widget child}) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        color: Colors.white.withValues(alpha: 0.08),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.45),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+
+  // ========================= SCORE =========================
+
+  Widget _buildSleepScoreHero() {
+    final int score = (_avg7 * 10).clamp(0, 100).round();
+
+    final String label = score >= 80
+        ? "Excellent sleep"
+        : score >= 65
+            ? "Good, but improvable"
+            : score >= 45
+                ? "Short or inconsistent sleep"
+                : "Poor sleep quality";
+
+    return _glassCard(
       child: Column(
-        key: const ValueKey('weekly'),
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const Text(
+            "Sleep Score",
+            style: TextStyle(color: Colors.white70),
+          ),
+          const SizedBox(height: 6),
           Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              IconButton(
-                icon: const Icon(Icons.chevron_left, color: kBrand),
-                onPressed: () {
-                  setState(() => _weekOffset--);
-                  _loadSummary();
-                },
-              ),
               Text(
-                _weekLabel(),
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              IconButton(
-                icon: const Icon(Icons.chevron_right, color: kBrand),
-                onPressed: () {
-                  setState(() => _weekOffset++);
-                  _loadSummary();
-                },
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              _statCard("Avg", "${averageHours.toStringAsFixed(1)}h"),
-              const SizedBox(width: 8),
-              _statCard("Longest", "${longest.toStringAsFixed(1)}h"),
-              const SizedBox(width: 8),
-              _statCard("Shortest", "${shortest.toStringAsFixed(1)}h"),
-            ],
-          ),
-          const SizedBox(height: 15),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: LinearProgressIndicator(
-              value: progress,
-              minHeight: 10,
-              backgroundColor: Colors.deepPurple.shade50,
-              valueColor: AlwaysStoppedAnimation(
-                progress > 0.6 ? kBrand : Colors.purpleAccent,
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: BarChart(
-                BarChartData(
-                  maxY: 12,
-                  minY: 0,
-                  borderData: FlBorderData(show: false),
-                  gridData: FlGridData(
-                    show: true,
-                    drawVerticalLine: false,
-                    getDrawingHorizontalLine: (value) =>
-                        FlLine(color: Colors.grey.shade200, strokeWidth: 1),
-                  ),
-                  barTouchData: BarTouchData(
-                    enabled: true,
-                    touchTooltipData: BarTouchTooltipData(
-                      tooltipRoundedRadius: 8,
-                      tooltipPadding: const EdgeInsets.all(6),
-                      // Background color varies across fl_chart versions; omit for compatibility
-                      getTooltipItem: (a, b, rod, c) => BarTooltipItem(
-                        "${rod.toY.toStringAsFixed(1)}h",
-                        const TextStyle(color: Colors.white),
-                      ),
-                    ),
-                  ),
-                  titlesData: FlTitlesData(
-                    leftTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        interval: 2,
-                        getTitlesWidget: (value, _) => Text(
-                          "${value.toInt()}h",
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Colors.black54,
-                          ),
-                        ),
-                      ),
-                    ),
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        getTitlesWidget: (v, _) {
-                          const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-                          if (v.toInt() >= 0 && v.toInt() < days.length) {
-                            return Text(
-                              days[v.toInt()],
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Colors.black87,
-                              ),
-                            );
-                          }
-                          return const SizedBox.shrink();
-                        },
-                      ),
-                    ),
-                    rightTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    topTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                  ),
-                  barGroups: List.generate(7, (i) {
-                    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-                    final hours = dailyHours[days[i]] ?? 0;
-                    return BarChartGroupData(
-                      x: i,
-                      barRods: [
-                        BarChartRodData(
-                          toY: hours.clamp(0, 12),
-                          color: kBrand,
-                          width: 18,
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                      ],
-                    );
-                  }),
+                "$score",
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 48,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
-            ),
+              const SizedBox(width: 6),
+              const Text(
+                "/ 100",
+                style: TextStyle(color: Colors.white54),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            style: const TextStyle(color: Colors.white70),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildDailyView() {
-    final today = DateFormat('E').format(DateTime.now());
-    final hours = dailyHours[today] ?? 0;
-    return Expanded(
-      child: Center(
-        child: Text(
-          hours == 0
-              ? 'No sleep data for today 😴'
-              : 'Today you slept ${hours.toStringAsFixed(1)} hours 😴',
-          style: const TextStyle(fontSize: 16, fontStyle: FontStyle.italic),
-        ),
+  // ========================= STATS =========================
+
+  Widget _buildRecentStats() {
+    return _glassCard(
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          _statBox("Avg (7 days)", "${_avg7.toStringAsFixed(1)} h"),
+          _statBox("Avg (30 days)", "${_avg30.toStringAsFixed(1)} h"),
+        ],
       ),
     );
   }
 
-  Widget _statCard(String label, String value) {
-    return Expanded(
-      child: Container(
-        height: 60,
-        decoration: BoxDecoration(
-          color: Colors.deepPurple.shade50,
-          borderRadius: BorderRadius.circular(12),
+  Widget _statBox(String title, String value) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          value,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
         ),
-        child: Center(
+        Text(
+          title,
+          style: const TextStyle(color: Colors.white70, fontSize: 12),
+        ),
+      ],
+    );
+  }
+
+  // ========================= ROUTINE =========================
+
+  Widget _buildRoutineStability() {
+    final String label = _daysWithSleep30 >= 25
+        ? "Very consistent"
+        : _daysWithSleep30 >= 18
+            ? "Fairly consistent"
+            : _daysWithSleep30 >= 10
+                ? "Irregular"
+                : "Highly irregular";
+
+    return _glassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            "Routine Stability",
+            style: TextStyle(color: Colors.white, fontSize: 18),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            "Sleep recorded on $_daysWithSleep30 of the last 30 days",
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ========================= HEATMAP =========================
+
+  Widget _buildHeatmapCard() {
+    return _glassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            "Last 28 Days",
+            style: TextStyle(color: Colors.white, fontSize: 18),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            "Tap a day with sleep to see details",
+            style: TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          const SizedBox(height: 16),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _heatmapDays.length,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 7,
+              mainAxisSpacing: 6,
+              crossAxisSpacing: 6,
+            ),
+            itemBuilder: (_, i) {
+              final day = _heatmapDays[i];
+              final hours = _hoursForDate(day);
+
+              final double intensity =
+                  hours == 0 ? 0.0 : (hours / 9).clamp(0.15, 1.0).toDouble();
+
+              final Color bgColor = hours == 0
+                  ? Colors.white.withValues(alpha: 0.12)
+                  : Color.lerp(
+                      const Color(0xFF4A00E0),
+                      const Color(0xFF8E2DE2),
+                      intensity,
+                    )!;
+
+              return GestureDetector(
+                onTap: hours == 0
+                    ? null
+                    : () => _showDayDetails(context, day, hours),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(6),
+                    color: bgColor,
+                  ),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          const _HeatmapLegend(),
+        ],
+      ),
+    );
+  }
+
+  // ========================= DAY DETAILS =========================
+
+  void _showDayDetails(BuildContext context, DateTime day, double hours) {
+    final label = DateFormat('EEEE, MMM d').format(day);
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1A002E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (_) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                value,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
               ),
+              const SizedBox(height: 12),
               Text(
                 label,
                 style: const TextStyle(
-                  fontWeight: FontWeight.w500,
-                  color: Colors.deepPurple,
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
                 ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                "${hours.toStringAsFixed(1)} h slept",
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 32,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 16),
+              LinearProgressIndicator(
+                value: (hours / 9).clamp(0.0, 1.0),
+                backgroundColor: Colors.white12,
+                color: kBrand,
+                minHeight: 8,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                _sleepInsight(hours),
+                style: const TextStyle(color: Colors.white70),
               ),
             ],
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
-  // ===================== YEARLY VIEW =====================
-  Widget _buildYearlyView() {
-    final avg = monthlyHours.values.isEmpty
-        ? 0.0
-        : monthlyHours.values.fold(0.0, (a, b) => a + b) /
-            monthlyHours.values.where((h) => h > 0).length.clamp(1, 12);
+  String _sleepInsight(double h) {
+    if (h >= 7 && h <= 8.5) return "Great night. This is an optimal sleep range.";
+    if (h >= 6) return "Decent sleep, slightly below optimal.";
+    if (h >= 4) return "Short sleep. Try improving your wind-down routine.";
+    return "Very low sleep. If frequent, consider adjusting your schedule.";
+  }
 
-    return Expanded(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: BarChart(
-          BarChartData(
-            maxY: 12,
-            minY: 0,
-            alignment: BarChartAlignment.spaceAround,
-            borderData: FlBorderData(show: false),
-            gridData: FlGridData(
-              show: true,
-              drawVerticalLine: false,
-              getDrawingHorizontalLine: (value) =>
-                  FlLine(color: Colors.grey.shade200, strokeWidth: 1),
+  // ========================= HISTORY =========================
+
+  Widget _buildHistoryLink() {
+    return _glassCard(
+      child: Row(
+        children: [
+          const Icon(Icons.timeline, color: Colors.white),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              "View detailed sleep history",
+              style: TextStyle(color: Colors.white70),
             ),
-            barTouchData: BarTouchData(
-              enabled: true,
-              touchTooltipData: BarTouchTooltipData(
-                tooltipRoundedRadius: 8,
-                tooltipPadding: const EdgeInsets.all(6),
-                // Omit background color for fl_chart compatibility
-                getTooltipItem: (a, b, rod, c) => BarTooltipItem(
-                  "${rod.toY.toStringAsFixed(1)}h",
-                  const TextStyle(color: Colors.white),
-                ),
-              ),
-            ),
-            titlesData: FlTitlesData(
-              leftTitles: AxisTitles(
-                sideTitles: SideTitles(
-                  showTitles: true,
-                  reservedSize: 35,
-                  interval: 2,
-                  getTitlesWidget: (value, _) => Text(
-                    "${value.toInt()}h",
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Colors.black54,
-                    ),
-                  ),
-                ),
-              ),
-              bottomTitles: AxisTitles(
-                sideTitles: SideTitles(
-                  showTitles: true,
-                  reservedSize: 32,
-                  getTitlesWidget: (v, _) {
-                    final months = monthlyHours.keys.toList();
-                    if (v.toInt() < months.length) {
-                      return Text(
-                        months[v.toInt()],
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: Colors.black87,
-                        ),
-                      );
-                    }
-                    return const SizedBox.shrink();
-                  },
-                ),
-              ),
-              rightTitles: const AxisTitles(
-                sideTitles: SideTitles(showTitles: false),
-              ),
-              topTitles: const AxisTitles(
-                sideTitles: SideTitles(showTitles: false),
-              ),
-            ),
-            extraLinesData: ExtraLinesData(
-              horizontalLines: [
-                HorizontalLine(
-                  y: avg.toDouble(),
-                  color: kBrand.withOpacity(0.3),
-                  strokeWidth: 2,
-                  dashArray: const [5, 5],
-                  label: HorizontalLineLabel(
-                    show: true,
-                    labelResolver: (_) => "Avg ${avg.toStringAsFixed(1)}h",
-                    style: const TextStyle(
-                      color: Colors.black54,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            barGroups: List.generate(monthlyHours.length, (i) {
-              final month = monthlyHours.keys.elementAt(i);
-              final hours = monthlyHours[month] ?? 0;
-              return BarChartGroupData(
-                x: i,
-                barRods: [
-                  BarChartRodData(
-                    toY: hours.clamp(0, 12),
-                    gradient: const LinearGradient(
-                      colors: [Color(0xff8E2DE2), Color(0xff4A00E0)],
-                      begin: Alignment.bottomCenter,
-                      end: Alignment.topCenter,
-                    ),
-                    width: 18,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                ],
-              );
-            }),
           ),
-        ),
+          TextButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const SleepHistoryScreen(),
+                ),
+              );
+            },
+            child: const Text(
+              "Open",
+              style: TextStyle(color: kBrand),
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
+// ========================= LEGEND =========================
+
+class _HeatmapLegend extends StatelessWidget {
+  const _HeatmapLegend();
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: const [
+        _LegendItem(color: Color(0xFF4A00E0), label: "0–3h"),
+        SizedBox(width: 12),
+        _LegendItem(color: Color(0xFF6A1BE0), label: "3–6h"),
+        SizedBox(width: 12),
+        _LegendItem(color: Color(0xFF8E2DE2), label: "6–9h"),
+      ],
+    );
+  }
+}
+
+class _LegendItem extends StatelessWidget {
+  final Color color;
+  final String label;
+
+  const _LegendItem({required this.color, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(3),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: const TextStyle(color: Colors.white70, fontSize: 11),
+        ),
+      ],
+    );
+  }
+}

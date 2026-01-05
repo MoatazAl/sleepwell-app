@@ -1,4 +1,4 @@
-name: sleep_app
+name: sleepwell_app
 description: "A new Flutter project."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
@@ -52,10 +52,16 @@ dependencies:
   cached_network_image: ^3.3.1
   intl: ^0.20.2
 
+  sensors_plus: ^5.0.0
+  battery_plus: ^5.0.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  integration_test:
+    sdk: flutter
+  mockito: ^5.4.4
+  fake_cloud_firestore: ^4.0.0
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme.dart';
 
-enum NavSection { home, tracker, summary, settings }
+enum NavSection { home, tracker, summary, insights, settings }
 
 class AppNavBar extends StatelessWidget implements PreferredSizeWidget {
   const AppNavBar({super.key, required this.current});
@@ -11,7 +11,8 @@ class AppNavBar extends StatelessWidget implements PreferredSizeWidget {
   @override
   Size get preferredSize => const Size.fromHeight(64);
 
-  bool _smallWidth(BuildContext context) => MediaQuery.of(context).size.width < 720;
+  bool _smallWidth(BuildContext context) =>
+      MediaQuery.of(context).size.width < 720;
 
   @override
   Widget build(BuildContext context) {
@@ -35,6 +36,7 @@ class AppNavBar extends StatelessWidget implements PreferredSizeWidget {
               PopupMenuItem(value: NavSection.home, child: Text('Home')),
               PopupMenuItem(value: NavSection.tracker, child: Text('Tracker')),
               PopupMenuItem(value: NavSection.summary, child: Text('Summary')),
+              PopupMenuItem(value: NavSection.insights, child: Text('Insights')),
               PopupMenuItem(value: NavSection.settings, child: Text('Settings')),
             ],
           ),
@@ -49,6 +51,7 @@ class AppNavBar extends StatelessWidget implements PreferredSizeWidget {
         _NavItem(label: 'Home', section: NavSection.home, current: current),
         _NavItem(label: 'Tracker', section: NavSection.tracker, current: current),
         _NavItem(label: 'Summary', section: NavSection.summary, current: current),
+        _NavItem(label: 'Insights', section: NavSection.insights, current: current),
         _NavItem(label: 'Settings', section: NavSection.settings, current: current),
         const SizedBox(width: 8),
       ],
@@ -65,6 +68,9 @@ class AppNavBar extends StatelessWidget implements PreferredSizeWidget {
         break;
       case NavSection.summary:
         Navigator.pushReplacementNamed(context, '/summary');
+        break;
+      case NavSection.insights:
+        Navigator.pushReplacementNamed(context, '/insights');
         break;
       case NavSection.settings:
         Navigator.pushReplacementNamed(context, '/settings');
@@ -87,32 +93,41 @@ class _NavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final selected = section == current;
+
     return TextButton(
-      onPressed: selected ? null : () {
-        switch (section) {
-          case NavSection.home:
-            Navigator.pushReplacementNamed(context, '/home');
-            break;
-          case NavSection.tracker:
-            Navigator.pushReplacementNamed(context, '/tracker');
-            break;
-          case NavSection.summary:
-            Navigator.pushReplacementNamed(context, '/summary');
-            break;
-          case NavSection.settings:
-            Navigator.pushReplacementNamed(context, '/settings');
-            break;
-        }
-      },
+      onPressed: selected
+          ? null
+          : () {
+              switch (section) {
+                case NavSection.home:
+                  Navigator.pushReplacementNamed(context, '/home');
+                  break;
+                case NavSection.tracker:
+                  Navigator.pushReplacementNamed(context, '/tracker');
+                  break;
+                case NavSection.summary:
+                  Navigator.pushReplacementNamed(context, '/summary');
+                  break;
+                case NavSection.insights:
+                  Navigator.pushReplacementNamed(context, '/insights');
+                  break;
+                case NavSection.settings:
+                  Navigator.pushReplacementNamed(context, '/settings');
+                  break;
+              }
+            },
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 6),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(label, style: TextStyle(
-              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-              color: selected ? kBrand : Colors.black87,
-            )),
+            Text(
+              label,
+              style: TextStyle(
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: selected ? kBrand : Colors.black87,
+              ),
+            ),
             const SizedBox(height: 2),
             AnimatedContainer(
               duration: const Duration(milliseconds: 180),

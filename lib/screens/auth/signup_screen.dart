@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import '../../services/auth/auth_service.dart';
 import '../home/home_screen.dart';
 
 class SignupScreen extends StatefulWidget {
@@ -21,21 +21,20 @@ class _SignupScreenState extends State<SignupScreen> {
     setState(() => _loading = true);
 
     try {
-      await FirebaseAuth.instance.createUserWithEmailAndPassword(
+      await AuthService.signup(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
-
+      if (!mounted) return;
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const HomeScreen()),
       );
-    } on FirebaseAuthException catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message ?? "Signup failed")),
-      );
+    } catch (e) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text("Signup failed: $e")));
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -66,17 +65,15 @@ class _SignupScreenState extends State<SignupScreen> {
                     ),
                     const SizedBox(height: 10),
                     const Text(
-                      "Sign up with your email. You can always link Google, Facebook, or Apple later.",
+                      "Sign up with your email. You can always link Google later.",
                       textAlign: TextAlign.center,
                       style: TextStyle(fontSize: 14, color: Colors.grey),
                     ),
                     const SizedBox(height: 20),
 
-                    // Email field
                     _buildTextField(_emailController, "Email"),
                     const SizedBox(height: 16),
 
-                    // Password field with toggle + Enter submits
                     TextFormField(
                       controller: _passwordController,
                       obscureText: _obscurePassword,
@@ -104,10 +101,8 @@ class _SignupScreenState extends State<SignupScreen> {
                           ? "Please enter Password"
                           : null,
                     ),
-
                     const SizedBox(height: 24),
 
-                    // Signup button
                     _loading
                         ? const CircularProgressIndicator()
                         : ElevatedButton(
@@ -130,16 +125,12 @@ class _SignupScreenState extends State<SignupScreen> {
     );
   }
 
-  Widget _buildTextField(TextEditingController controller, String label,
-      {bool obscureText = false}) {
+  Widget _buildTextField(TextEditingController controller, String label) {
     return TextFormField(
       controller: controller,
-      obscureText: obscureText,
       decoration: InputDecoration(
         labelText: label,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
       ),
       validator: (value) =>
           value == null || value.isEmpty ? "Please enter $label" : null,

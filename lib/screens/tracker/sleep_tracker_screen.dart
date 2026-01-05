@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../widgets/app_navbar.dart';
 import '../../theme.dart';
+import 'manual_sleep_entry_screen.dart';
 
 class SleepTrackerScreen extends StatefulWidget {
   const SleepTrackerScreen({super.key});
@@ -55,6 +56,7 @@ class _SleepTrackerScreenState extends State<SleepTrackerScreen> {
       final sp = await SharedPreferences.getInstance();
       final millis = sp.getInt('sleep_active_start_ms');
       final docId = sp.getString('sleep_active_doc');
+
       if (millis != null && docId != null) {
         _activeStart = DateTime.fromMillisecondsSinceEpoch(millis);
         _activeDocId = docId;
@@ -62,7 +64,7 @@ class _SleepTrackerScreenState extends State<SleepTrackerScreen> {
         final q = await _firestore
             .collection('users')
             .doc(user.uid)
-            .collection('sleep_sessions')
+            .collection('sleep_records')
             .where('end', isNull: true)
             .orderBy('start', descending: true)
             .limit(1)
@@ -72,7 +74,9 @@ class _SleepTrackerScreenState extends State<SleepTrackerScreen> {
           final d = q.docs.first;
           _activeDocId = d.id;
           _activeStart = (d['start'] as Timestamp).toDate();
-          await sp.setInt('sleep_active_start_ms', _activeStart!.millisecondsSinceEpoch);
+
+          await sp.setInt('sleep_active_start_ms',
+              _activeStart!.millisecondsSinceEpoch);
           await sp.setString('sleep_active_doc', _activeDocId!);
         }
       }
@@ -83,7 +87,7 @@ class _SleepTrackerScreenState extends State<SleepTrackerScreen> {
 
       setState(() => _initializing = false);
     } catch (e) {
-      if (kDebugMode) print('Failed to restore session: $e');
+      if (kDebugMode) print("Restore failed: $e");
       setState(() => _initializing = false);
     }
   }
@@ -104,10 +108,11 @@ class _SleepTrackerScreenState extends State<SleepTrackerScreen> {
     if (user == null || _activeStart != null) return;
 
     final now = DateTime.now();
+
     final docRef = await _firestore
         .collection('users')
         .doc(user.uid)
-        .collection('sleep_sessions')
+        .collection('sleep_records')
         .add({
       'start': Timestamp.fromDate(now),
       'end': null,
@@ -131,11 +136,12 @@ class _SleepTrackerScreenState extends State<SleepTrackerScreen> {
     if (user == null || _activeStart == null || _activeDocId == null) return;
 
     final end = DateTime.now();
+
     try {
       await _firestore
           .collection('users')
           .doc(user.uid)
-          .collection('sleep_sessions')
+          .collection('sleep_records')
           .doc(_activeDocId!)
           .update({'end': Timestamp.fromDate(end)});
 
@@ -153,13 +159,13 @@ class _SleepTrackerScreenState extends State<SleepTrackerScreen> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Sleep session saved. Good morning! ☀️')),
+        const SnackBar(content: Text("Session saved. Good morning! ☀️")),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error stopping session: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Stop error: $e")));
     }
   }
 
@@ -168,54 +174,64 @@ class _SleepTrackerScreenState extends State<SleepTrackerScreen> {
     if (user == null) return;
 
     final now = DateTime.now();
-    final startOfWeek = DateTime(now.year, now.month, now.day)
-        .subtract(Duration(days: (DateTime.now().weekday + 6) % 7));
+    final startOfWeek =
+        now.subtract(Duration(days: (now.weekday + 6) % 7)); // Sunday start
 
     final q = await _firestore
         .collection('users')
         .doc(user.uid)
-        .collection('sleep_sessions')
-        .where('start', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfWeek))
-        .orderBy('start', descending: true)
+        .collection('sleep_records')
+        .where("start", isGreaterThanOrEqualTo: Timestamp.fromDate(startOfWeek))
+        .orderBy("start", descending: true)
         .get();
 
     double totalHours = 0;
     double longest = 0;
     int completedCount = 0;
 
-    final completedDays = <String>{};
     final df = DateFormat('yyyy-MM-dd');
+    final completedDays = <String>{};
 
     for (final doc in q.docs) {
       final start = (doc['start'] as Timestamp).toDate();
-      final endTs = doc.data().containsKey('end') ? doc['end'] as Timestamp? : null;
+      final endTs = doc['end'] as Timestamp?;
       final end = endTs?.toDate();
+
       if (end != null && end.isAfter(start)) {
         final hours = end.difference(start).inMinutes / 60.0;
         totalHours += hours;
-        completedCount += 1;
+        completedCount++;
         if (hours > longest) longest = hours;
         completedDays.add(df.format(end));
       }
     }
 
-    final avg = completedCount == 0 ? 0 : totalHours / completedCount;
+    final double avg =
+        completedCount == 0 ? 0.0 : totalHours / completedCount;
 
     int streak = 0;
     for (int i = 0; i < 14; i++) {
-      final day = DateTime(now.year, now.month, now.day).subtract(Duration(days: i));
+      final day = now.subtract(Duration(days: i));
       if (completedDays.contains(df.format(day))) {
-        streak += 1;
+        streak++;
       } else {
         break;
       }
     }
 
     setState(() {
-      _avgHoursThisWeek = double.parse(avg.toStringAsFixed(2));
-      _longestHours = double.parse(longest.toStringAsFixed(2));
+      _avgHoursThisWeek = avg;
+      _longestHours = longest;
       _streakDays = streak;
     });
+  }
+
+  Future<void> _openManualAddScreen() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ManualSleepEntryScreen()),
+    );
+    if (result == true) _loadWeeklyPreview();
   }
 
   @override
@@ -223,205 +239,243 @@ class _SleepTrackerScreenState extends State<SleepTrackerScreen> {
     final isActive = _activeStart != null;
 
     if (_initializing) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     return Scaffold(
       appBar: const AppNavBar(current: NavSection.tracker),
-      body: RefreshIndicator(
-        onRefresh: _loadWeeklyPreview,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _SessionCard(
-              isActive: isActive,
-              elapsed: _elapsed,
-              onStart: _startSession,
-              onStop: _stopSession,
+      backgroundColor: Colors.transparent,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF120022), Color(0xFF050010)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: SafeArea(
+          child: RefreshIndicator(
+            color: kBrand,
+            onRefresh: _loadWeeklyPreview,
+            child: ListView(
+              padding: const EdgeInsets.all(20),
+              children: [
+                const Text(
+                  "Sleep Tracker",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                _glassCard(child: _TrackerCardUI(isActive, _elapsed, _startSession, _stopSession)),
+                const SizedBox(height: 20),
+
+                GestureDetector(
+                  onTap: _openManualAddScreen,
+                  child: _glassCard(
+                    child: Row(
+                      children: const [
+                        Icon(Icons.add_circle, color: Colors.white, size: 28),
+                        SizedBox(width: 12),
+                        Text("Add Sleep Session Manually",
+                            style: TextStyle(color: Colors.white, fontSize: 16))
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                _glassCard(
+                  child: _StatsPreviewUI(
+                    avg: _avgHoursThisWeek,
+                    longest: _longestHours,
+                    streak: _streakDays,
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                _glassCard(
+                  child: Row(
+                    children: const [
+                      Icon(Icons.lightbulb, color: Colors.white),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          "Try to keep your sleep and wake times consistent for better rest 🌙",
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
-            _PreviewStats(
-              avgHoursThisWeek: _avgHoursThisWeek,
-              longestHours: _longestHours,
-              streakDays: _streakDays,
-              onViewHistory: () => Navigator.pushReplacementNamed(context, '/summary'),
-            ),
-            const SizedBox(height: 16),
-            _TipCard(
-              text: isActive
-                  ? 'Try dimming lights and silencing notifications for better sleep quality. 🌙'
-                  : 'Aim for consistent bedtimes to improve sleep balance.',
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
+
+  Widget _glassCard({required Widget child}) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: LinearGradient(
+          colors: [
+            Colors.white.withOpacity(0.12),
+            Colors.white.withOpacity(0.05),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        border: Border.all(color: Colors.white.withOpacity(0.09)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.45),
+            blurRadius: 22,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
 }
 
-class _SessionCard extends StatelessWidget {
-  const _SessionCard({
-    required this.isActive,
-    required this.elapsed,
-    required this.onStart,
-    required this.onStop,
-  });
-
+class _TrackerCardUI extends StatelessWidget {
   final bool isActive;
   final Duration elapsed;
   final VoidCallback onStart;
   final VoidCallback onStop;
 
-  String _fmt(Duration d) {
-    final h = d.inHours.toString().padLeft(2, '0');
-    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$h:$m:$s';
-  }
+  const _TrackerCardUI(
+    this.isActive,
+    this.elapsed,
+    this.onStart,
+    this.onStop);
+
+  String _fmt(Duration d) =>
+      "${d.inHours.toString().padLeft(2, '0')}:"
+      "${d.inMinutes.remainder(60).toString().padLeft(2, '0')}:"
+      "${d.inSeconds.remainder(60).toString().padLeft(2, '0')}";
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            Icon(
-              isActive ? Icons.nightlight_round : Icons.bedtime_outlined,
-              size: 48,
-              color: isActive ? kBrand : Colors.grey,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              isActive ? 'Tracking your sleep…' : 'Ready to sleep?',
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              isActive ? _fmt(elapsed) : 'Press Start when you go to bed',
-              style: const TextStyle(fontSize: 20, letterSpacing: 1),
-            ),
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: isActive ? null : onStart,
-                    icon: const Icon(Icons.play_arrow),
-                    label: const Text('Start'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton.tonalIcon(
-                    onPressed: isActive ? onStop : null,
-                    icon: const Icon(Icons.stop_circle_outlined),
-                    label: const Text('Stop'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Recent sessions are shown in Summary.',
-              style: TextStyle(color: Colors.grey[600], fontSize: 12),
-            ),
-          ],
+    return Column(
+      children: [
+        Icon(
+          isActive ? Icons.nightlight_round : Icons.bedtime_outlined,
+          size: 60,
+          color: Colors.white,
         ),
-      ),
-    );
-  }
-}
+        const SizedBox(height: 12),
+        Text(
+          isActive ? "Tracking your sleep…" : "Ready to sleep?",
+          style: const TextStyle(
+              color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          isActive ? _fmt(elapsed) : "Press Start when going to bed",
+          style: const TextStyle(color: Colors.white70, fontSize: 18),
+        ),
 
-class _PreviewStats extends StatelessWidget {
-  const _PreviewStats({
-    required this.avgHoursThisWeek,
-    required this.longestHours,
-    required this.streakDays,
-    required this.onViewHistory,
-  });
+        const SizedBox(height: 22),
 
-  final double avgHoursThisWeek;
-  final double longestHours;
-  final int streakDays;
-  final VoidCallback onViewHistory;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        Row(
           children: [
-            const Text('Sleep Stats Preview', style: TextStyle(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _StatChip(label: 'Avg (week)', value: '${avgHoursThisWeek.toStringAsFixed(2)} h'),
-                _StatChip(label: 'Longest', value: '${longestHours.toStringAsFixed(2)} h'),
-                _StatChip(label: 'Streak', value: '$streakDays days'),
-              ],
+            Expanded(
+              child: ElevatedButton(
+                onPressed: isActive ? null : onStart,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: kBrand,
+                  disabledBackgroundColor: Colors.deepPurple.shade200,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                ),
+                child: const Text("Start", style: TextStyle(color: Colors.white)),
+              ),
             ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: onViewHistory,
-                icon: const Icon(Icons.chevron_right),
-                label: const Text('View Full Summary'),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ElevatedButton(
+                onPressed: isActive ? onStop : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.redAccent,
+                  disabledBackgroundColor: Colors.red.shade200,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                ),
+                child: const Text("Stop", style: TextStyle(color: Colors.white)),
               ),
             ),
           ],
         ),
-      ),
+      ],
     );
   }
 }
 
-class _StatChip extends StatelessWidget {
-  const _StatChip({required this.label, required this.value});
+class _StatsPreviewUI extends StatelessWidget {
+  final double avg;
+  final double longest;
+  final int streak;
 
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Chip(
-      label: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 2),
-          Text(label, style: const TextStyle(fontSize: 12)),
-        ],
-      ),
-    );
-  }
-}
-
-class _TipCard extends StatelessWidget {
-  const _TipCard({required this.text});
-  final String text;
+  const _StatsPreviewUI({
+    required this.avg,
+    required this.longest,
+    required this.streak,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
-      elevation: 0,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          "Weekly Sleep Summary",
+          style: TextStyle(color: Colors.white, fontSize: 18),
+        ),
+        const SizedBox(height: 14),
+
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
           children: [
-            const Icon(Icons.lightbulb, size: 20),
-            const SizedBox(width: 8),
-            Expanded(child: Text(text)),
+            _stat("Avg Sleep", "${avg.toStringAsFixed(1)}h"),
+            _stat("Longest", "${longest.toStringAsFixed(1)}h"),
+            _stat("Streak", "$streak days"),
           ],
         ),
+      ],
+    );
+  }
+
+  Widget _stat(String label, String value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: Colors.white.withOpacity(0.12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(value,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold)),
+          Text(label,
+              style: const TextStyle(color: Colors.white70, fontSize: 12)),
+        ],
       ),
     );
   }

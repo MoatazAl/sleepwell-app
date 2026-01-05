@@ -1,4 +1,3 @@
 <resources>
-    <string name="facebook_app_id">773603165549507</string>
-    <string name="facebook_client_token">d2b6e4a24dc545c9cdc2889401836592</string> 
+    <string name="app_name">SleepWell</string>
 </resources>

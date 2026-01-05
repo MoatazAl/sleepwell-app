@@ -1,12 +1,7 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_sign_in/google_sign_in.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
+import '../../services/auth/auth_service.dart';
 import '../home/home_screen.dart';
 import 'signup_screen.dart';
-import '../../utils/user_prefs.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -26,12 +21,6 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _rememberMe = true;
 
   @override
-  void initState() {
-    super.initState();
-    _loadSavedCredentials();
-  }
-
-  @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
@@ -39,106 +28,30 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  Future<void> _loadSavedCredentials() async {
-    final prefs = await SharedPreferences.getInstance();
-    _emailController.text = prefs.getString('email') ?? '';
-    _passwordController.text = prefs.getString('password') ?? '';
-  }
-
-  Future<void> _saveCredentials() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (_rememberMe) {
-      await prefs.setString('email', _emailController.text.trim());
-      await prefs.setString('password', _passwordController.text.trim());
-    } else {
-      await prefs.remove('email');
-      await prefs.remove('password');
-    }
-  }
-
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
 
     try {
-      await FirebaseAuth.instance.setPersistence(
-        _rememberMe ? Persistence.LOCAL : Persistence.SESSION,
-      );
-
-      final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
+      await AuthService.login(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
+        rememberMe: _rememberMe,
       );
-
-      await _saveCredentials();
-      await UserPrefs.saveUserInfo(cred.user!);
-      await UserPrefs.setProvider("email");
-
       if (!mounted) return;
       _goHome();
-    } on FirebaseAuthException catch (e) {
-      _showError(_mapError(e.code));
     } catch (e) {
-      _showError("Unexpected error: $e");
+      _showError("Login failed: $e");
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  String _mapError(String code) {
-    switch (code) {
-      case 'user-not-found':
-        return 'No account found for this email.';
-      case 'wrong-password':
-        return 'Incorrect password.';
-      case 'invalid-email':
-        return 'Invalid email format.';
-      default:
-        return 'Login failed. Please check your details.';
-    }
-  }
-
   Future<void> _loginWithGoogle() async {
     try {
-      await FirebaseAuth.instance.setPersistence(
-        _rememberMe ? Persistence.LOCAL : Persistence.SESSION,
-      );
-
-      if (kIsWeb) {
-        // ✅ Web login
-        final googleProvider = GoogleAuthProvider()
-          ..addScope('email')
-          ..addScope('profile');
-
-        final cred = await FirebaseAuth.instance.signInWithPopup(googleProvider);
-        await UserPrefs.saveUserInfo(cred.user!);
-        await UserPrefs.setProvider("google");
-        if (!mounted) return;
-        _goHome();
-      } else {
-        // ✅ Mobile login - FIXED: Use the correct constructor
-        final googleSignIn = GoogleSignIn(
-          scopes: ['email', 'profile'],
-        );
-
-        final googleUser = await googleSignIn.signIn();
-        if (googleUser == null) return; // user canceled
-
-        final googleAuth = await googleUser.authentication;
-
-        final credential = GoogleAuthProvider.credential(
-          accessToken: googleAuth.accessToken,
-          idToken: googleAuth.idToken,
-        );
-
-        final userCred =
-            await FirebaseAuth.instance.signInWithCredential(credential);
-
-        await UserPrefs.saveUserInfo(userCred.user!);
-        await UserPrefs.setProvider("google");
-        if (!mounted) return;
-        _goHome();
-      }
+      await AuthService.signInWithGoogle(rememberMe: _rememberMe);
+      if (!mounted) return;
+      _goHome();
     } catch (e) {
       _showError("Google login failed: $e");
     }
@@ -163,7 +76,9 @@ class _LoginScreenState extends State<LoginScreen> {
         child: Card(
           elevation: 8,
           margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 60),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Form(
@@ -177,7 +92,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 24),
 
-                  // Email
+                  // Email field
                   TextFormField(
                     controller: _emailController,
                     textInputAction: TextInputAction.next,
@@ -194,7 +109,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 16),
 
-                  // Password
+                  // Password field
                   TextFormField(
                     controller: _passwordController,
                     focusNode: _passwordFocus,
@@ -212,8 +127,9 @@ class _LoginScreenState extends State<LoginScreen> {
                               ? Icons.visibility_off
                               : Icons.visibility,
                         ),
-                        onPressed: () =>
-                            setState(() => _obscurePassword = !_obscurePassword),
+                        onPressed: () => setState(
+                          () => _obscurePassword = !_obscurePassword,
+                        ),
                       ),
                     ),
                     validator: (v) =>

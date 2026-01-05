@@ -1,66 +1,48 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:intl/intl.dart';
+import '../../../services/firestore/firestore_service.dart';
+import '../../../models/sleep_record.dart';
+import 'edit_sleep_entry_screen.dart';
 
-class SleepHistoryScreen extends StatefulWidget {
+class SleepHistoryScreen extends StatelessWidget {
   const SleepHistoryScreen({super.key});
-
-  @override
-  State<SleepHistoryScreen> createState() => _SleepHistoryScreenState();
-}
-
-class _SleepHistoryScreenState extends State<SleepHistoryScreen> {
-  final _firestore = FirebaseFirestore.instance;
-  final _user = FirebaseAuth.instance.currentUser;
-
-  Future<void> _deleteSession(String id) async {
-    await _firestore
-        .collection('users')
-        .doc(_user!.uid)
-        .collection('sleep_sessions')
-        .doc(id)
-        .delete();
-  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text("Sleep History")),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: _firestore
-            .collection('users')
-            .doc(_user!.uid)
-            .collection('sleep_sessions')
-            .orderBy('start', descending: true)
-            .snapshots(),
+      body: FutureBuilder<List<SleepRecord>>(
+        future: FirestoreService.getAllSleepRecords(),
         builder: (context, snap) {
-          if (!snap.hasData) return const Center(child: CircularProgressIndicator());
-          final docs = snap.data!.docs;
-          if (docs.isEmpty) {
+          if (snap.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          if (!snap.hasData || snap.data!.isEmpty) {
             return const Center(child: Text("No sleep sessions yet."));
           }
+
+          final list = snap.data!;
+
           return ListView.builder(
-            itemCount: docs.length,
-            itemBuilder: (context, i) {
-              final d = docs[i];
-              final data = d.data()! as Map<String, dynamic>;
-              final start = (data['start'] as Timestamp).toDate();
-              final end = (data['end'] as Timestamp?)?.toDate();
-              final duration = end == null ? 0 : end.difference(start).inMinutes / 60;
-              return Dismissible(
-                key: Key(d.id),
-                direction: DismissDirection.endToStart,
-                background: Container(
-                  color: Colors.redAccent,
-                  alignment: Alignment.centerRight,
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: const Icon(Icons.delete, color: Colors.white),
+            itemCount: list.length,
+            itemBuilder: (_, i) {
+              final s = list[i];
+
+              return ListTile(
+                title: Text(
+                  "${s.start} — ${s.computedDurationHours.toStringAsFixed(1)}h",
                 ),
-                onDismissed: (_) => _deleteSession(d.id),
-                child: ListTile(
-                  title: Text("${DateFormat('E, MMM d').format(start)} — ${duration.toStringAsFixed(1)}h"),
-                  subtitle: Text("${DateFormat('h:mm a').format(start)} → ${end != null ? DateFormat('h:mm a').format(end) : 'ongoing'}"),
+                subtitle: Text("Quality: ${s.sleepQuality ?? 'N/A'}"),
+                trailing: IconButton(
+                  icon: const Icon(Icons.edit),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => EditSleepEntryScreen(record: s),
+                      ),
+                    );
+                  },
                 ),
               );
             },
