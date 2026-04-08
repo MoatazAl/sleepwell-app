@@ -5,8 +5,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../widgets/app_navbar.dart';
+
 import '../../theme.dart';
+import '../../widgets/app_navbar.dart';
 import 'manual_sleep_entry_screen.dart';
 
 class SleepTrackerScreen extends StatefulWidget {
@@ -75,8 +76,10 @@ class _SleepTrackerScreenState extends State<SleepTrackerScreen> {
           _activeDocId = d.id;
           _activeStart = (d['start'] as Timestamp).toDate();
 
-          await sp.setInt('sleep_active_start_ms',
-              _activeStart!.millisecondsSinceEpoch);
+          await sp.setInt(
+            'sleep_active_start_ms',
+            _activeStart!.millisecondsSinceEpoch,
+          );
           await sp.setString('sleep_active_doc', _activeDocId!);
         }
       }
@@ -87,7 +90,9 @@ class _SleepTrackerScreenState extends State<SleepTrackerScreen> {
 
       setState(() => _initializing = false);
     } catch (e) {
-      if (kDebugMode) print("Restore failed: $e");
+      if (kDebugMode) {
+        print('Restore failed: $e');
+      }
       setState(() => _initializing = false);
     }
   }
@@ -95,8 +100,7 @@ class _SleepTrackerScreenState extends State<SleepTrackerScreen> {
   void _listenTicker() {
     _ticker?.cancel();
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      if (_activeStart == null) return;
+      if (!mounted || _activeStart == null) return;
       setState(() {
         _elapsed = DateTime.now().difference(_activeStart!);
       });
@@ -155,17 +159,17 @@ class _SleepTrackerScreenState extends State<SleepTrackerScreen> {
         _elapsed = Duration.zero;
       });
 
-      _loadWeeklyPreview();
+      await _loadWeeklyPreview();
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Session saved. Good morning! ☀️")),
+        const SnackBar(content: Text('Session saved successfully.')),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Stop error: $e")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Stop error: $e')),
+      );
     }
   }
 
@@ -175,14 +179,14 @@ class _SleepTrackerScreenState extends State<SleepTrackerScreen> {
 
     final now = DateTime.now();
     final startOfWeek =
-        now.subtract(Duration(days: (now.weekday + 6) % 7)); // Sunday start
+        now.subtract(Duration(days: (now.weekday + 6) % 7));
 
     final q = await _firestore
         .collection('users')
         .doc(user.uid)
         .collection('sleep_records')
-        .where("start", isGreaterThanOrEqualTo: Timestamp.fromDate(startOfWeek))
-        .orderBy("start", descending: true)
+        .where('start', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfWeek))
+        .orderBy('start', descending: true)
         .get();
 
     double totalHours = 0;
@@ -206,8 +210,7 @@ class _SleepTrackerScreenState extends State<SleepTrackerScreen> {
       }
     }
 
-    final double avg =
-        completedCount == 0 ? 0.0 : totalHours / completedCount;
+    final avg = completedCount == 0 ? 0.0 : totalHours / completedCount;
 
     int streak = 0;
     for (int i = 0; i < 14; i++) {
@@ -231,84 +234,155 @@ class _SleepTrackerScreenState extends State<SleepTrackerScreen> {
       context,
       MaterialPageRoute(builder: (_) => const ManualSleepEntryScreen()),
     );
-    if (result == true) _loadWeeklyPreview();
+    if (result == true) {
+      _loadWeeklyPreview();
+    }
   }
+
+  String _formatElapsed(Duration d) =>
+      '${d.inHours.toString().padLeft(2, '0')}:'
+      '${d.inMinutes.remainder(60).toString().padLeft(2, '0')}:'
+      '${d.inSeconds.remainder(60).toString().padLeft(2, '0')}';
 
   @override
   Widget build(BuildContext context) {
     final isActive = _activeStart != null;
 
     if (_initializing) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator(color: kBrand)),
+      );
     }
 
     return Scaffold(
       appBar: const AppNavBar(current: NavSection.tracker),
       backgroundColor: Colors.transparent,
       body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF120022), Color(0xFF050010)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
+        decoration: appBackgroundDecoration,
         child: SafeArea(
           child: RefreshIndicator(
             color: kBrand,
             onRefresh: _loadWeeklyPreview,
             child: ListView(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
               children: [
-                const Text(
-                  "Sleep Tracker",
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-
-                _glassCard(child: _TrackerCardUI(isActive, _elapsed, _startSession, _stopSession)),
-                const SizedBox(height: 20),
-
-                GestureDetector(
-                  onTap: _openManualAddScreen,
-                  child: _glassCard(
-                    child: Row(
-                      children: const [
-                        Icon(Icons.add_circle, color: Colors.white, size: 28),
-                        SizedBox(width: 12),
-                        Text("Add Sleep Session Manually",
-                            style: TextStyle(color: Colors.white, fontSize: 16))
-                      ],
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-
                 _glassCard(
-                  child: _StatsPreviewUI(
-                    avg: _avgHoursThisWeek,
-                    longest: _longestHours,
-                    streak: _streakDays,
+                  padding: const EdgeInsets.all(22),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Sleep Tracker',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 28,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        isActive
+                            ? 'Your session is running. Keep this going until you wake up.'
+                            : 'Start tracking when you go to bed, or add a session manually if needed.',
+                        style: const TextStyle(
+                          color: kTextSecondary,
+                          height: 1.45,
+                        ),
+                      ),
+                      const SizedBox(height: 22),
+                      _buildMainTrackerCard(isActive),
+                    ],
                   ),
                 ),
-
-                const SizedBox(height: 20),
-
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _glassCard(
+                        child: _smallActionTile(
+                          icon: Icons.edit_calendar_rounded,
+                          title: 'Add manually',
+                          subtitle: 'Log a night yourself',
+                          onTap: _openManualAddScreen,
+                          accent: kAccentBlue,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _glassCard(
+                        child: _smallActionTile(
+                          icon: Icons.nightlight_round,
+                          title: isActive ? 'Tracking now' : 'Ready tonight',
+                          subtitle: isActive
+                              ? 'Session is active'
+                              : 'Press start at bedtime',
+                          onTap: null,
+                          accent: kBrand,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                _glassCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Weekly Sleep Summary',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _metricCard(
+                              label: 'Avg sleep',
+                              value: '${_avgHoursThisWeek.toStringAsFixed(1)}h',
+                              accent: kAccentBlue,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _metricCard(
+                              label: 'Longest',
+                              value: '${_longestHours.toStringAsFixed(1)}h',
+                              accent: kBrand,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _metricCard(
+                              label: 'Streak',
+                              value: '$_streakDays days',
+                              accent: const Color(0xFF22C55E),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 18),
                 _glassCard(
                   child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: const [
-                      Icon(Icons.lightbulb, color: Colors.white),
+                      Icon(Icons.lightbulb_outline_rounded,
+                          color: kAccentBlue, size: 22),
                       SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          "Try to keep your sleep and wake times consistent for better rest 🌙",
-                          style: TextStyle(color: Colors.white70),
+                          'Consistency matters more than one perfect night. Try to keep your sleep and wake times within a regular window.',
+                          style: TextStyle(
+                            color: kTextSecondary,
+                            height: 1.45,
+                          ),
                         ),
                       ),
                     ],
@@ -322,161 +396,212 @@ class _SleepTrackerScreenState extends State<SleepTrackerScreen> {
     );
   }
 
-  Widget _glassCard({required Widget child}) {
+  Widget _buildMainTrackerCard(bool isActive) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      width: double.infinity,
+      padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        gradient: LinearGradient(
-          colors: [
-            Colors.white.withOpacity(0.12),
-            Colors.white.withOpacity(0.05),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+        borderRadius: BorderRadius.circular(24),
+        color: Colors.white.withValues(alpha: 0.04),
+        border: Border.all(
+          color: isActive
+              ? kAccentBlue.withValues(alpha: 0.30)
+              : Colors.white.withValues(alpha: 0.08),
         ),
-        border: Border.all(color: Colors.white.withOpacity(0.09)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.45),
+            color: isActive
+                ? kAccentBlue.withValues(alpha: 0.12)
+                : Colors.black.withValues(alpha: 0.18),
             blurRadius: 22,
-            offset: const Offset(0, 10),
+            offset: const Offset(0, 8),
           ),
         ],
       ),
-      child: child,
-    );
-  }
-}
-
-class _TrackerCardUI extends StatelessWidget {
-  final bool isActive;
-  final Duration elapsed;
-  final VoidCallback onStart;
-  final VoidCallback onStop;
-
-  const _TrackerCardUI(
-    this.isActive,
-    this.elapsed,
-    this.onStart,
-    this.onStop);
-
-  String _fmt(Duration d) =>
-      "${d.inHours.toString().padLeft(2, '0')}:"
-      "${d.inMinutes.remainder(60).toString().padLeft(2, '0')}:"
-      "${d.inSeconds.remainder(60).toString().padLeft(2, '0')}";
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Icon(
-          isActive ? Icons.nightlight_round : Icons.bedtime_outlined,
-          size: 60,
-          color: Colors.white,
-        ),
-        const SizedBox(height: 12),
-        Text(
-          isActive ? "Tracking your sleep…" : "Ready to sleep?",
-          style: const TextStyle(
-              color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 10),
-        Text(
-          isActive ? _fmt(elapsed) : "Press Start when going to bed",
-          style: const TextStyle(color: Colors.white70, fontSize: 18),
-        ),
-
-        const SizedBox(height: 22),
-
-        Row(
-          children: [
-            Expanded(
-              child: ElevatedButton(
-                onPressed: isActive ? null : onStart,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: kBrand,
-                  disabledBackgroundColor: Colors.deepPurple.shade200,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14)),
-                ),
-                child: const Text("Start", style: TextStyle(color: Colors.white)),
+      child: Column(
+        children: [
+          Container(
+            width: 84,
+            height: 84,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                colors: isActive
+                    ? [kAccentBlue, const Color(0xFF0EA5E9)]
+                    : [kBrand, kBrandDark],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: ElevatedButton(
-                onPressed: isActive ? onStop : null,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.redAccent,
-                  disabledBackgroundColor: Colors.red.shade200,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14)),
-                ),
-                child: const Text("Stop", style: TextStyle(color: Colors.white)),
-              ),
+            child: Icon(
+              isActive ? Icons.bedtime_rounded : Icons.nightlight_round,
+              color: Colors.white,
+              size: 42,
+            ),
+          ),
+          const SizedBox(height: 18),
+          Text(
+            isActive ? 'Tracking your sleep' : 'Ready to sleep?',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 26,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            isActive ? _formatElapsed(_elapsed) : 'Press Start when going to bed',
+            style: TextStyle(
+              color: isActive ? Colors.white : kTextSecondary,
+              fontSize: isActive ? 34 : 18,
+              fontWeight: isActive ? FontWeight.w800 : FontWeight.w500,
+              letterSpacing: isActive ? 1.0 : 0.0,
+            ),
+          ),
+          if (_activeStart != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Started ${DateFormat('EEE, h:mm a').format(_activeStart!)}',
+              style: const TextStyle(color: kTextMuted),
             ),
           ],
-        ),
-      ],
-    );
-  }
-}
-
-class _StatsPreviewUI extends StatelessWidget {
-  final double avg;
-  final double longest;
-  final int streak;
-
-  const _StatsPreviewUI({
-    required this.avg,
-    required this.longest,
-    required this.streak,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          "Weekly Sleep Summary",
-          style: TextStyle(color: Colors.white, fontSize: 18),
-        ),
-        const SizedBox(height: 14),
-
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            _stat("Avg Sleep", "${avg.toStringAsFixed(1)}h"),
-            _stat("Longest", "${longest.toStringAsFixed(1)}h"),
-            _stat("Streak", "$streak days"),
-          ],
-        ),
-      ],
+          const SizedBox(height: 24),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: isActive ? null : _startSession,
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  label: const Text('Start'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: isActive ? _stopSession : null,
+                  icon: const Icon(Icons.stop_rounded),
+                  label: const Text('Stop'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: isActive ? Colors.white : kTextMuted,
+                    side: BorderSide(
+                      color: isActive
+                          ? const Color(0xFFFB7185)
+                          : Colors.white.withValues(alpha: 0.08),
+                    ),
+                    backgroundColor: isActive
+                        ? const Color(0x22FB7185)
+                        : Colors.transparent,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _stat(String label, String value) {
+  Widget _metricCard({
+    required String label,
+    required String value,
+    required Color accent,
+  }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: Colors.white.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(18),
+        color: Colors.white.withValues(alpha: 0.05),
+        border: Border.all(color: accent.withValues(alpha: 0.18)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(value,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold)),
-          Text(label,
-              style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          Container(
+            height: 6,
+            width: 36,
+            decoration: BoxDecoration(
+              color: accent,
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: const TextStyle(color: kTextSecondary),
+          ),
         ],
       ),
+    );
+  }
+
+  Widget _smallActionTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color accent,
+    required VoidCallback? onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Row(
+        children: [
+          Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icon, color: accent),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    color: kTextSecondary,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (onTap != null)
+            const Icon(Icons.chevron_right_rounded, color: kTextMuted),
+        ],
+      ),
+    );
+  }
+
+  Widget _glassCard({
+    required Widget child,
+    EdgeInsetsGeometry padding = const EdgeInsets.all(18),
+  }) {
+    return Container(
+      padding: padding,
+      decoration: glassCardDecoration,
+      child: child,
     );
   }
 }

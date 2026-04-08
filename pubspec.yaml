@@ -55,6 +55,7 @@ dependencies:
   sensors_plus: ^5.0.0
   battery_plus: ^5.0.0
 
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
