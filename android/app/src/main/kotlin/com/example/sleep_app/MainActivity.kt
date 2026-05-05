@@ -98,6 +98,20 @@ class MainActivity : FlutterFragmentActivity() {
                     }
                 }
 
+                "readSleepSessions" -> {
+                    val daysBack = call.argument<Int>("daysBack") ?: 30
+
+                    activityScope.launch {
+                        try {
+                            result.success(
+                                healthConnectManager.readSleepSessions(daysBack.toLong())
+                            )
+                        } catch (e: Exception) {
+                            result.error("READ_SLEEP_RANGE_FAILED", e.message, null)
+                        }
+                    }
+                }
+
                 else -> result.notImplemented()
             }
         }

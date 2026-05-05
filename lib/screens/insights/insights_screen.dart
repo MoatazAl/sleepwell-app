@@ -6,6 +6,9 @@ import 'package:intl/intl.dart';
 
 import '../../theme.dart';
 import '../../widgets/app_navbar.dart';
+import '../assessment/assessment_hub_screen.dart';
+import '../coach/sleep_coach_screen.dart';
+import 'dart:ui' as ui;
 
 class InsightsScreen extends StatefulWidget {
   const InsightsScreen({super.key});
@@ -21,8 +24,8 @@ class _InsightsScreenState extends State<InsightsScreen> {
   bool _loading = true;
   final List<_SleepRecord> _sessions = [];
 
-  double _avg7 = 0.0;
-  double _avg30 = 0.0;
+  double _avg7 = 0;
+  double _avg30 = 0;
   int _trackedDays30 = 0;
 
   @override
@@ -31,77 +34,70 @@ class _InsightsScreenState extends State<InsightsScreen> {
     _loadData();
   }
 
-  void _openRecommendation(_Recommendation rec) {
-  showModalBottomSheet(
-    context: context,
-    backgroundColor: Colors.transparent,
-    isScrollControlled: true,
-    builder: (_) => _RecommendationSheet(rec: rec),
-  );
-}
-
   Future<void> _loadData() async {
-    if (_user == null) {
-      setState(() => _loading = false);
-      return;
-    }
+    try {
+      if (_user == null) {
+        debugPrint('Insights: no signed-in user');
+        return;
+      }
 
-    final snap = await _firestore
-        .collection('users')
-        .doc(_user!.uid)
-        .collection('sleep_records')
-        .orderBy('start', descending: true)
-        .limit(120)
-        .get();
+      final snap = await _firestore
+          .collection('users')
+          .doc(_user.uid)
+          .collection('sleep_records')
+          .limit(120)
+          .get()
+          .timeout(const Duration(seconds: 8));
 
-    _sessions.clear();
+      _sessions.clear();
 
-    for (final doc in snap.docs) {
-      final data = doc.data();
-      final start = (data['start'] as Timestamp?)?.toDate();
-      final end = (data['end'] as Timestamp?)?.toDate();
+      for (final doc in snap.docs) {
+        final data = doc.data();
 
-      if (start == null || end == null || !end.isAfter(start)) continue;
+        final start = (data['start'] as Timestamp?)?.toDate();
+        final end = (data['end'] as Timestamp?)?.toDate();
 
-      final durationHours =
-          (data['durationHours'] as num?)?.toDouble() ??
-          end.difference(start).inMinutes / 60.0;
+        if (start == null || end == null || !end.isAfter(start)) continue;
 
-      final source = (data['source'] ?? 'manual').toString();
+        final hours =
+            (data['durationHours'] as num?)?.toDouble() ??
+            end.difference(start).inMinutes / 60.0;
 
-      _sessions.add(
-        _SleepRecord(
-          start: start,
-          end: end,
-          durationHours: durationHours,
-          source: source,
-        ),
-      );
-    }
+        _sessions.add(
+          _SleepRecord(
+            start: start,
+            end: end,
+            durationHours: hours,
+            source: (data['source'] ?? 'manual').toString(),
+          ),
+        );
+      }
 
-    _computeStats();
-
-    if (mounted) {
-      setState(() => _loading = false);
+      _sessions.sort((a, b) => b.start.compareTo(a.start));
+      _computeStats();
+    } catch (e) {
+      debugPrint('Insights load failed: $e');
+      _sessions.clear();
+      _avg7 = 0;
+      _avg30 = 0;
+      _trackedDays30 = 0;
+    } finally {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
 
   void _computeStats() {
     final now = DateTime.now();
-    final dailyMap = <String, double>{};
-
-    for (final s in _sessions) {
-      final key = DateFormat('yyyy-MM-dd').format(s.start);
-      dailyMap[key] = (dailyMap[key] ?? 0) + s.durationHours;
-    }
+    final daily = _dailyTotals();
 
     double total7 = 0;
     double total30 = 0;
     int count7 = 0;
     int count30 = 0;
-    final tracked = <String>{};
 
-    dailyMap.forEach((key, hours) {
+    daily.forEach((key, hours) {
       final date = DateTime.parse(key);
       final diff = now.difference(date).inDays;
 
@@ -113,47 +109,116 @@ class _InsightsScreenState extends State<InsightsScreen> {
       if (diff >= 0 && diff <= 29) {
         total30 += hours;
         count30++;
-        if (hours > 0) tracked.add(key);
       }
     });
 
     _avg7 = count7 == 0 ? 0 : total7 / count7;
     _avg30 = count30 == 0 ? 0 : total30 / count30;
-    _trackedDays30 = tracked.length;
+    _trackedDays30 = count30;
+  }
+
+  Map<String, double> _dailyTotals() {
+    final map = <String, double>{};
+
+    for (final s in _sessions) {
+      final key = DateFormat('yyyy-MM-dd').format(s.start);
+      map[key] = (map[key] ?? 0) + s.durationHours;
+    }
+
+    return map;
+  }
+
+  List<_SleepDay> _lastNDays(int n) {
+    final daily = _dailyTotals();
+    final today = DateTime.now();
+
+    return List.generate(n, (i) {
+      final date = DateTime(
+        today.year,
+        today.month,
+        today.day,
+      ).subtract(Duration(days: n - 1 - i));
+      final key = DateFormat('yyyy-MM-dd').format(date);
+
+      return _SleepDay(date: date, hours: daily[key] ?? 0);
+    });
+  }
+
+  double _weekdayAverage() {
+    final days = _sessions
+        .where(
+          (s) =>
+              s.start.weekday >= DateTime.monday &&
+              s.start.weekday <= DateTime.friday,
+        )
+        .toList();
+
+    if (days.isEmpty) return 0;
+    return days.fold(0.0, (total, s) => total + s.durationHours) / days.length;
+  }
+
+  double _weekendAverage() {
+    final days = _sessions
+        .where(
+          (s) =>
+              s.start.weekday == DateTime.saturday ||
+              s.start.weekday == DateTime.sunday,
+        )
+        .toList();
+
+    if (days.isEmpty) return 0;
+    return days.fold(0.0, (total, s) => total + s.durationHours) / days.length;
+  }
+
+  String _scoreLabel() {
+    if (_sessions.isEmpty) return 'Building profile';
+    if (_avg7 >= 7 && _avg7 <= 8.5 && _trackedDays30 >= 20) {
+      return 'Strong rhythm';
+    }
+    if (_avg7 < 6) return 'Needs recovery';
+    if (_avg7 < 7) return 'Almost there';
+    if (_avg7 > 8.8) return 'Long sleep phase';
+    return 'Stable pattern';
+  }
+
+  Color _scoreColor() {
+    if (_avg7 >= 7 && _avg7 <= 8.5) return const Color(0xFF22C55E);
+    if (_avg7 < 6) return const Color(0xFFF97316);
+    return const Color(0xFFF59E0B);
   }
 
   List<_InsightItem> _mainInsights() {
-    final items = <_InsightItem>[];
-
     if (_sessions.isEmpty) {
       return [
         _InsightItem(
           icon: Icons.auto_awesome_rounded,
           title: 'No insights yet',
           body:
-              'Track a few nights of sleep and SleepWell will start detecting patterns and giving personalized feedback.',
+              'Track a few nights and SleepWell will start detecting your sleep rhythm, weak spots, and progress.',
           color: kBrand,
         ),
       ];
     }
 
+    final items = <_InsightItem>[];
+
     if (_avg7 < 6) {
       items.add(
         _InsightItem(
-          icon: Icons.bedtime_rounded,
-          title: 'Sleep duration is low',
+          icon: Icons.bedtime_off_rounded,
+          title: 'Your recent sleep is too low',
           body:
-              'Your recent average is well below the recommended range. Sleeping longer is the single biggest improvement area right now.',
-          color: const Color(0xFFF59E0B),
+              'Your 7-day average is below the common adult sleep range. The main improvement is simple: protect more total sleep time.',
+          color: const Color(0xFFF97316),
         ),
       );
     } else if (_avg7 < 7) {
       items.add(
         _InsightItem(
           icon: Icons.hotel_rounded,
-          title: 'You are close, but still short',
+          title: 'Close, but still short',
           body:
-              'Your recent sleep is slightly below target. Even an extra 30 to 60 minutes could improve your weekly average noticeably.',
+              'You are near the target zone. Adding 30–60 minutes per night would noticeably improve your weekly average.',
           color: const Color(0xFFF59E0B),
         ),
       );
@@ -161,9 +226,9 @@ class _InsightsScreenState extends State<InsightsScreen> {
       items.add(
         _InsightItem(
           icon: Icons.check_circle_rounded,
-          title: 'You are in a healthy range',
+          title: 'Healthy sleep range',
           body:
-              'Your recent average is in a strong zone. The next goal is keeping that pattern consistent across the week.',
+              'Your recent average sits in a strong range. Your next goal is consistency, not just duration.',
           color: const Color(0xFF22C55E),
         ),
       );
@@ -171,22 +236,23 @@ class _InsightsScreenState extends State<InsightsScreen> {
       items.add(
         _InsightItem(
           icon: Icons.nights_stay_rounded,
-          title: 'Sleep is longer than usual',
+          title: 'Longer sleep pattern',
           body:
-              'Your recent sleep is on the longer side. This may reflect recovery, fatigue, or inconsistent sleep timing.',
+              'Your recent sleep is on the longer side. This may reflect recovery, fatigue, or irregular timing.',
           color: kAccentBlue,
         ),
       );
     }
 
     final diff = _avg7 - _avg30;
+
     if (diff >= 0.7) {
       items.add(
         _InsightItem(
           icon: Icons.trending_up_rounded,
-          title: 'Recent trend is improving',
+          title: 'Your recent trend is improving',
           body:
-              'Your last 7 days are clearly better than your monthly baseline. That suggests recent progress.',
+              'The last 7 days are higher than your 30-day baseline, which suggests recent progress.',
           color: const Color(0xFF22C55E),
         ),
       );
@@ -194,47 +260,47 @@ class _InsightsScreenState extends State<InsightsScreen> {
       items.add(
         _InsightItem(
           icon: Icons.trending_down_rounded,
-          title: 'Recent trend has dropped',
+          title: 'Your recent trend dropped',
           body:
-              'Your recent week is below your normal monthly level. Something in the last few days may be hurting your routine.',
+              'The last 7 days are below your monthly baseline. Something recent may be disrupting your routine.',
           color: const Color(0xFFF59E0B),
         ),
       );
     } else {
       items.add(
         _InsightItem(
-          icon: Icons.insights_rounded,
-          title: 'Trend is relatively stable',
+          icon: Icons.show_chart_rounded,
+          title: 'Trend is stable',
           body:
-              'Your recent sleep is broadly in line with your longer-term average.',
+              'Your weekly average is close to your monthly baseline, meaning your pattern is not changing sharply.',
           color: kAccentBlue,
         ),
       );
     }
 
-    final weekdayAvg = _weekdayAverage();
-    final weekendAvg = _weekendAverage();
+    final weekday = _weekdayAverage();
+    final weekend = _weekendAverage();
 
-    if (weekdayAvg > 0 && weekendAvg > 0) {
-      final weekendDiff = weekendAvg - weekdayAvg;
+    if (weekday > 0 && weekend > 0) {
+      final gap = weekend - weekday;
 
-      if (weekendDiff >= 1.0) {
+      if (gap >= 1.0) {
         items.add(
           _InsightItem(
             icon: Icons.weekend_rounded,
-            title: 'Weekend catch-up pattern detected',
+            title: 'Weekend catch-up detected',
             body:
-                'You sleep noticeably longer on weekends than weekdays, which can signal weekday sleep debt.',
+                'You sleep noticeably longer on weekends. This often means weekdays are creating sleep debt.',
             color: kBrand,
           ),
         );
-      } else if (weekendDiff <= -0.7) {
+      } else if (gap <= -0.7) {
         items.add(
           _InsightItem(
             icon: Icons.schedule_rounded,
-            title: 'Weekend pattern looks unusual',
+            title: 'Weekend rhythm looks disrupted',
             body:
-                'Your weekends are shorter than your weekdays, which may reflect schedule disruption.',
+                'Your weekends are shorter than weekdays, which may point to schedule changes or late nights.',
             color: const Color(0xFFF59E0B),
           ),
         );
@@ -242,9 +308,9 @@ class _InsightsScreenState extends State<InsightsScreen> {
         items.add(
           _InsightItem(
             icon: Icons.balance_rounded,
-            title: 'Week pattern is fairly balanced',
+            title: 'Week rhythm is balanced',
             body:
-                'Your weekday and weekend sleep are fairly close, which points to a steadier routine.',
+                'Weekday and weekend sleep are close, which is a good sign for routine stability.',
             color: const Color(0xFF22C55E),
           ),
         );
@@ -257,7 +323,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
           icon: Icons.edit_calendar_rounded,
           title: 'Tracking is still sparse',
           body:
-              'You do not have many tracked nights yet. More consistent logging will make these insights much stronger.',
+              'More tracked nights will make the charts and recommendations much smarter.',
           color: kBrand,
         ),
       );
@@ -266,37 +332,14 @@ class _InsightsScreenState extends State<InsightsScreen> {
     return items.take(4).toList();
   }
 
-  List<_QuickMetric> _quickMetrics() {
-    return [
-      _QuickMetric(
-        label: 'Avg 7 days',
-        value: '${_avg7.toStringAsFixed(1)} h',
-        color: kAccentBlue,
-        icon: Icons.bedtime_rounded,
-      ),
-      _QuickMetric(
-        label: 'Avg 30 days',
-        value: '${_avg30.toStringAsFixed(1)} h',
-        color: kBrand,
-        icon: Icons.calendar_month_rounded,
-      ),
-      _QuickMetric(
-        label: 'Tracked days',
-        value: '$_trackedDays30 / 30',
-        color: const Color(0xFF22C55E),
-        icon: Icons.checklist_rounded,
-      ),
-    ];
-  }
-
   List<_Recommendation> _recommendations() {
     final items = <_Recommendation>[];
 
     if (_avg7 < 7) {
       items.add(
         _Recommendation(
-          title: 'Aim for more sleep time',
-          body: 'Try increasing total sleep by 30–60 minutes this week.',
+          title: 'Increase total sleep',
+          body: 'Try adding 30–60 minutes to your sleep window this week.',
           color: const Color(0xFFF59E0B),
           icon: Icons.hotel_rounded,
         ),
@@ -307,21 +350,21 @@ class _InsightsScreenState extends State<InsightsScreen> {
       items.add(
         _Recommendation(
           title: 'Track more nights',
-          body: 'More recorded sleep will unlock stronger patterns and smarter feedback.',
+          body: 'Consistent logging unlocks stronger pattern detection.',
           color: kBrand,
           icon: Icons.edit_note_rounded,
         ),
       );
     }
 
-    final weekdayAvg = _weekdayAverage();
-    final weekendAvg = _weekendAverage();
+    final weekday = _weekdayAverage();
+    final weekend = _weekendAverage();
 
-    if (weekdayAvg > 0 && weekendAvg > 0 && (weekendAvg - weekdayAvg) >= 1.0) {
+    if (weekday > 0 && weekend > 0 && weekend - weekday >= 1) {
       items.add(
         _Recommendation(
           title: 'Reduce weekday sleep debt',
-          body: 'Try making weekday sleep more consistent so weekends are less compensatory.',
+          body: 'Make weekdays closer to weekends so recovery is less extreme.',
           color: kAccentBlue,
           icon: Icons.weekend_rounded,
         ),
@@ -331,8 +374,8 @@ class _InsightsScreenState extends State<InsightsScreen> {
     if (items.isEmpty) {
       items.add(
         _Recommendation(
-          title: 'Maintain your current routine',
-          body: 'Your recent pattern looks stable. Keep tracking and preserve consistency.',
+          title: 'Maintain your rhythm',
+          body: 'Your recent pattern looks good. Preserve consistency.',
           color: const Color(0xFF22C55E),
           icon: Icons.favorite_rounded,
         ),
@@ -342,45 +385,133 @@ class _InsightsScreenState extends State<InsightsScreen> {
     return items.take(3).toList();
   }
 
-  double _weekdayAverage() {
-    final days = _sessions
-        .where(
-          (s) =>
-              s.start.weekday >= DateTime.monday &&
-              s.start.weekday <= DateTime.friday,
-        )
-        .toList();
-
-    if (days.isEmpty) return 0.0;
-    return days.fold(0.0, (sum, s) => sum + s.durationHours) / days.length;
+  void _openRecommendation(_Recommendation rec) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => _RecommendationSheet(rec: rec),
+    );
   }
 
-  double _weekendAverage() {
-    final days = _sessions
-        .where(
-          (s) =>
-              s.start.weekday == DateTime.saturday ||
-              s.start.weekday == DateTime.sunday,
-        )
-        .toList();
-
-    if (days.isEmpty) return 0.0;
-    return days.fold(0.0, (sum, s) => sum + s.durationHours) / days.length;
+  Widget _buildAssessmentEntry(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const AssessmentHubScreen()),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.all(18),
+        decoration: glassCardDecoration,
+        child: Row(
+          children: [
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                color: kBrand.withValues(alpha: 0.16),
+              ),
+              child: const Icon(Icons.quiz_rounded, color: kBrand, size: 26),
+            ),
+            const SizedBox(width: 14),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Sleep Assessments',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Check sleep quality, fatigue, and insomnia patterns.',
+                    style: TextStyle(color: kTextSecondary, fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.arrow_forward_ios_rounded,
+              color: Colors.white38,
+              size: 16,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
-  List<_SleepRecord> _recentSessions() {
-    final copy = [..._sessions];
-    copy.sort((a, b) => b.start.compareTo(a.start));
-    return copy.take(6).toList();
+  Widget _buildCoachEntry(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const SleepCoachScreen()),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.all(18),
+        decoration: glassCardDecoration,
+        child: Row(
+          children: [
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                color: kAccentBlue.withValues(alpha: 0.16),
+                border: Border.all(color: kAccentBlue.withValues(alpha: 0.22)),
+              ),
+              child: const Icon(
+                Icons.auto_awesome_rounded,
+                color: kAccentBlue,
+                size: 26,
+              ),
+            ),
+            const SizedBox(width: 14),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Sleep Coach',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Learn schedule, environment, stages, habits, and recovery basics.',
+                    style: TextStyle(color: kTextSecondary, fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.arrow_forward_ios_rounded,
+              color: Colors.white38,
+              size: 16,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final insights = _mainInsights();
-    final metrics = _quickMetrics();
-    final recs = _recommendations();
-    final recent = _recentSessions();
     final isWide = MediaQuery.of(context).size.width >= 900;
+    final insights = _mainInsights();
+    final recs = _recommendations();
 
     return Scaffold(
       appBar: const AppNavBar(current: NavSection.insights),
@@ -394,75 +525,48 @@ class _InsightsScreenState extends State<InsightsScreen> {
                   color: kBrand,
                   onRefresh: _loadData,
                   child: ListView(
-                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
                     children: [
-                      _buildHero(insights.isNotEmpty ? insights.first : null),
+                      _buildHero(insights.first),
+
                       const SizedBox(height: 18),
-                      _buildMetricsRow(metrics, isWide),
+
+                      _buildAssessmentEntry(context),
+
+                      const SizedBox(height: 18),
+
+                      _buildCoachEntry(context),
+
+                      const SizedBox(height: 18),
+
+                      _buildMetrics(isWide),
+
                       const SizedBox(height: 22),
-                      const Text(
-                        'What matters most',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
+
+                      _sectionTitle('Sleep patterns'),
                       const SizedBox(height: 12),
-                      if (insights.isNotEmpty) _buildFocusCard(insights.first),
-                      const SizedBox(height: 12),
-                      ...insights.skip(1).map(
-                        (item) => Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: _buildSupportInsight(item),
-                        ),
-                      ),
+                      _buildChartsSection(isWide),
+
                       const SizedBox(height: 22),
-                      const Text(
-                        'Recommended next steps',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
+
+                      _sectionTitle('Key signals'),
                       const SizedBox(height: 12),
-                      if (isWide)
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: List.generate(recs.length, (i) {
-                            return Expanded(
-                              child: Padding(
-                                padding: EdgeInsets.only(
-                                  right: i == recs.length - 1 ? 0 : 12,
-                                ),
-                                child: _buildRecommendationCard(recs[i]),
-                              ),
-                            );
-                          }),
-                        )
-                      else
-                        Column(
-                          children: recs
-                              .map(
-                                (r) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 12),
-                                  child: _buildRecommendationCard(r),
-                                ),
-                              )
-                              .toList(),
-                        ),
+                      ...insights
+                          .skip(1)
+                          .map(
+                            (i) => Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: _buildSupportInsight(i),
+                            ),
+                          ),
+
                       const SizedBox(height: 22),
-                      const Text(
-                        'Recent nights',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
+
+                      _sectionTitle('Recommended next steps'),
                       const SizedBox(height: 12),
-                      _buildRecentSessionsStrip(recent),
+                      _buildRecommendations(recs, isWide),
+
+                      const SizedBox(height: 22),
                     ],
                   ),
                 ),
@@ -471,40 +575,31 @@ class _InsightsScreenState extends State<InsightsScreen> {
     );
   }
 
-  Widget _buildHero(_InsightItem? focus) {
+  Widget _sectionTitle(String text) {
+    return Text(
+      text,
+      style: const TextStyle(
+        color: Colors.white,
+        fontSize: 20,
+        fontWeight: FontWeight.w900,
+      ),
+    );
+  }
+
+  Widget _buildHero(_InsightItem focus) {
+    final color = _scoreColor();
+
     return Container(
       padding: const EdgeInsets.all(22),
       decoration: glassCardDecoration,
       child: Row(
         children: [
-          Container(
-            width: 62,
-            height: 62,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  (focus?.color ?? kBrand).withValues(alpha: 0.95),
-                  (focus?.color ?? kBrand).withValues(alpha: 0.55),
-                ],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: (focus?.color ?? kBrand).withValues(alpha: 0.22),
-                  blurRadius: 18,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Icon(
-              focus?.icon ?? Icons.auto_awesome_rounded,
-              color: Colors.white,
-              size: 28,
-            ),
+          _SleepRing(
+            progress: (_avg7 / 8).clamp(0.0, 1.15),
+            color: color,
+            center: _avg7 == 0 ? '--' : _avg7.toStringAsFixed(1),
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 18),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -514,22 +609,21 @@ class _InsightsScreenState extends State<InsightsScreen> {
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 28,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  focus?.title ?? 'Sleep patterns and recommendations',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
+                  _scoreLabel(),
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  focus?.body ??
-                      'SleepWell highlights what matters most in your recent sleep behavior.',
+                  focus.body,
                   style: const TextStyle(
                     color: kTextSecondary,
                     fontSize: 13,
@@ -544,17 +638,39 @@ class _InsightsScreenState extends State<InsightsScreen> {
     );
   }
 
-  Widget _buildMetricsRow(List<_QuickMetric> metrics, bool isWide) {
+  Widget _buildMetrics(bool isWide) {
+    final metrics = [
+      _Metric(
+        'Avg 7 days',
+        '${_avg7.toStringAsFixed(1)} h',
+        Icons.bedtime_rounded,
+        kAccentBlue,
+      ),
+      _Metric(
+        'Avg 30 days',
+        '${_avg30.toStringAsFixed(1)} h',
+        Icons.calendar_month_rounded,
+        kBrand,
+      ),
+      _Metric(
+        'Tracked',
+        '$_trackedDays30 / 30',
+        Icons.checklist_rounded,
+        const Color(0xFF22C55E),
+      ),
+    ];
+
     if (isWide) {
       return Row(
-        children: List.generate(metrics.length, (i) {
-          return Expanded(
+        children: List.generate(
+          metrics.length,
+          (i) => Expanded(
             child: Padding(
               padding: EdgeInsets.only(right: i == metrics.length - 1 ? 0 : 12),
-              child: _buildMetricCard(metrics[i]),
+              child: _metricCard(metrics[i]),
             ),
-          );
-        }),
+          ),
+        ),
       );
     }
 
@@ -563,14 +679,14 @@ class _InsightsScreenState extends State<InsightsScreen> {
           .map(
             (m) => Padding(
               padding: const EdgeInsets.only(bottom: 12),
-              child: _buildMetricCard(m),
+              child: _metricCard(m),
             ),
           )
           .toList(),
     );
   }
 
-  Widget _buildMetricCard(_QuickMetric metric) {
+  Widget _metricCard(_Metric metric) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: glassCardDecoration,
@@ -600,7 +716,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 18,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
               ],
@@ -611,56 +727,94 @@ class _InsightsScreenState extends State<InsightsScreen> {
     );
   }
 
-  Widget _buildFocusCard(_InsightItem item) {
+  Widget _buildChartsSection(bool isWide) {
+    final last7 = _lastNDays(7);
+    final trend14 = _lastNDays(14);
+    final heatmap = _lastNDays(28);
+
+    final trendCard = _chartCard(
+      title: '14-day trend',
+      subtitle: 'Your sleep direction over time',
+      child: _LineChart(days: trend14, goal: 7.5),
+    );
+
+    final barCard = _chartCard(
+      title: 'Last 7 nights',
+      subtitle: 'Night-by-night duration',
+      child: _BarChart(days: last7),
+    );
+
+    final heatCard = _chartCard(
+      title: '28-day consistency',
+      subtitle: 'Darker means closer to target',
+      child: _HeatMap(days: heatmap),
+    );
+
+    final bestWorst = _BestWorstCard(days: _lastNDays(30));
+
+    if (isWide) {
+      return Column(
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: trendCard),
+              const SizedBox(width: 12),
+              Expanded(child: barCard),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: heatCard),
+              const SizedBox(width: 12),
+              Expanded(child: bestWorst),
+            ],
+          ),
+        ],
+      );
+    }
+
+    return Column(
+      children: [
+        trendCard,
+        const SizedBox(height: 12),
+        barCard,
+        const SizedBox(height: 12),
+        heatCard,
+        const SizedBox(height: 12),
+        bestWorst,
+      ],
+    );
+  }
+
+  Widget _chartCard({
+    required String title,
+    required String subtitle,
+    required Widget child,
+  }) {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: glassCardDecoration,
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              gradient: LinearGradient(
-                colors: [item.color, item.color.withValues(alpha: 0.6)],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: item.color.withValues(alpha: 0.24),
-                  blurRadius: 16,
-                  offset: const Offset(0, 6),
-                ),
-              ],
-            ),
-            child: Icon(item.icon, color: Colors.white, size: 24),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item.title,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  item.body,
-                  style: const TextStyle(
-                    color: kTextSecondary,
-                    fontSize: 13,
-                    height: 1.45,
-                  ),
-                ),
-              ],
+          Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w900,
+              fontSize: 16,
             ),
           ),
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
+            style: const TextStyle(color: kTextMuted, fontSize: 12),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(height: 190, child: child),
         ],
       ),
     );
@@ -678,7 +832,6 @@ class _InsightsScreenState extends State<InsightsScreen> {
             decoration: BoxDecoration(
               color: item.color.withValues(alpha: 0.16),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: item.color.withValues(alpha: 0.24)),
             ),
             child: Icon(item.icon, color: item.color, size: 18),
           ),
@@ -689,7 +842,7 @@ class _InsightsScreenState extends State<InsightsScreen> {
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 13,
-                fontWeight: FontWeight.w600,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ),
@@ -698,200 +851,495 @@ class _InsightsScreenState extends State<InsightsScreen> {
     );
   }
 
-  Widget _buildRecommendationCard(_Recommendation rec) {
-  return GestureDetector(
-    onTap: () => _openRecommendation(rec),
-    child: Container(
-      padding: const EdgeInsets.all(18),
-      decoration: glassCardDecoration,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: rec.color.withValues(alpha: 0.16),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Icon(rec.icon, color: rec.color, size: 20),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            rec.title,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
+  Widget _buildRecommendations(List<_Recommendation> recs, bool isWide) {
+    if (isWide) {
+      return Row(
+        children: List.generate(
+          recs.length,
+          (i) => Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(right: i == recs.length - 1 ? 0 : 12),
+              child: _buildRecommendationCard(recs[i]),
             ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            rec.body,
-            style: const TextStyle(
-              color: kTextSecondary,
-              fontSize: 13,
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
-  Widget _buildRecentSessionsStrip(List<_SleepRecord> sessions) {
-    if (sessions.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(18),
-        decoration: glassCardDecoration,
-        child: const Text(
-          'No recorded sleep yet.',
-          style: TextStyle(color: kTextSecondary),
         ),
       );
     }
 
     return Column(
-      children: sessions.map((s) {
-        final qualityColor = s.durationHours >= 7
-            ? const Color(0xFF22C55E)
-            : s.durationHours >= 6
-            ? const Color(0xFFF59E0B)
-            : const Color(0xFFF97316);
-
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: glassCardDecoration,
-            child: Row(
-              children: [
-                Container(
-                  width: 10,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: qualityColor,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        DateFormat('EEE, MMM d').format(s.start),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${DateFormat('HH:mm').format(s.start)} - ${DateFormat('HH:mm').format(s.end)}',
-                        style: const TextStyle(
-                          color: kTextSecondary,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 7,
-                  ),
-                  decoration: BoxDecoration(
-                    color: (s.source == 'health_connect'
-                            ? const Color(0xFF22C55E)
-                            : kAccentBlue)
-                        .withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    s.source == 'health_connect' ? 'Watch' : 'Manual',
-                    style: TextStyle(
-                      color: s.source == 'health_connect'
-                          ? const Color(0xFF22C55E)
-                          : kAccentBlue,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  '${s.durationHours.toStringAsFixed(1)} h',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
+      children: recs
+          .map(
+            (r) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _buildRecommendationCard(r),
             ),
-          ),
-        );
-      }).toList(),
+          )
+          .toList(),
+    );
+  }
+
+  Widget _buildRecommendationCard(_Recommendation rec) {
+    return GestureDetector(
+      onTap: () => _openRecommendation(rec),
+      child: Container(
+        padding: const EdgeInsets.all(18),
+        decoration: glassCardDecoration,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(rec.icon, color: rec.color, size: 28),
+            const SizedBox(height: 14),
+            Text(
+              rec.title,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              rec.body,
+              style: const TextStyle(color: kTextSecondary, fontSize: 13),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
 
-class _SleepRecord {
-  final DateTime start;
-  final DateTime end;
-  final double durationHours;
-  final String source;
+class _SleepRing extends StatelessWidget {
+  final double progress;
+  final Color color;
+  final String center;
 
-  const _SleepRecord({
-    required this.start,
-    required this.end,
-    required this.durationHours,
-    required this.source,
+  const _SleepRing({
+    required this.progress,
+    required this.color,
+    required this.center,
   });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 86,
+      height: 86,
+      child: CustomPaint(
+        painter: _RingPainter(progress: progress, color: color),
+        child: Center(
+          child: Text(
+            center,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 21,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
-class _InsightItem {
-  final IconData icon;
-  final String title;
-  final String body;
+class _RingPainter extends CustomPainter {
+  final double progress;
   final Color color;
 
-  const _InsightItem({
-    required this.icon,
-    required this.title,
-    required this.body,
-    required this.color,
-  });
+  _RingPainter({required this.progress, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final stroke = 9.0;
+
+    final bg = Paint()
+      ..color = Colors.white.withValues(alpha: 0.08)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round;
+
+    final fg = Paint()
+      ..shader = SweepGradient(
+        colors: [color, color.withValues(alpha: 0.35), color],
+      ).createShader(rect)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round;
+
+    canvas.drawArc(rect.deflate(stroke), -math.pi / 2, math.pi * 2, false, bg);
+
+    canvas.drawArc(
+      rect.deflate(stroke),
+      -math.pi / 2,
+      math.pi * 2 * progress.clamp(0, 1),
+      false,
+      fg,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _RingPainter oldDelegate) {
+    return oldDelegate.progress != progress || oldDelegate.color != color;
+  }
 }
 
-class _QuickMetric {
-  final String label;
-  final String value;
-  final Color color;
-  final IconData icon;
+class _LineChart extends StatelessWidget {
+  final List<_SleepDay> days;
+  final double goal;
 
-  const _QuickMetric({
-    required this.label,
-    required this.value,
-    required this.color,
-    required this.icon,
-  });
+  const _LineChart({required this.days, required this.goal});
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      painter: _LineChartPainter(days: days, goal: goal),
+      size: Size.infinite,
+    );
+  }
 }
 
-class _Recommendation {
-  final String title;
-  final String body;
-  final Color color;
-  final IconData icon;
+class _LineChartPainter extends CustomPainter {
+  final List<_SleepDay> days;
+  final double goal;
 
-  const _Recommendation({
-    required this.title,
-    required this.body,
-    required this.color,
-    required this.icon,
-  });
+  _LineChartPainter({required this.days, required this.goal});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const left = 34.0;
+    const bottom = 28.0;
+    const top = 14.0;
+    const right = 8.0;
+
+    final chartW = size.width - left - right;
+    final chartH = size.height - top - bottom;
+    final maxY = 10.0;
+
+    final grid = Paint()
+      ..color = Colors.white.withValues(alpha: 0.07)
+      ..strokeWidth = 1;
+
+    final textPainter = TextPainter(textDirection: ui.TextDirection.ltr);
+
+    for (final h in [4, 6, 8]) {
+      final y = top + chartH - (h / maxY) * chartH;
+      canvas.drawLine(Offset(left, y), Offset(size.width - right, y), grid);
+
+      textPainter.text = TextSpan(
+        text: '${h}h',
+        style: const TextStyle(color: kTextMuted, fontSize: 10),
+      );
+      textPainter.layout();
+      textPainter.paint(canvas, Offset(0, y - 7));
+    }
+
+    final goalY = top + chartH - (goal / maxY) * chartH;
+    final goalPaint = Paint()
+      ..color = kBrand.withValues(alpha: 0.45)
+      ..strokeWidth = 1.4;
+
+    canvas.drawLine(
+      Offset(left, goalY),
+      Offset(size.width - right, goalY),
+      goalPaint,
+    );
+
+    if (days.isEmpty) return;
+
+    final points = <Offset>[];
+
+    for (int i = 0; i < days.length; i++) {
+      final x = left + (days.length == 1 ? 0 : i / (days.length - 1)) * chartW;
+      final y = top + chartH - (days[i].hours.clamp(0, maxY) / maxY) * chartH;
+      points.add(Offset(x, y));
+    }
+
+    final path = Path()..moveTo(points.first.dx, points.first.dy);
+
+    for (int i = 1; i < points.length; i++) {
+      final prev = points[i - 1];
+      final curr = points[i];
+      final midX = (prev.dx + curr.dx) / 2;
+      path.cubicTo(midX, prev.dy, midX, curr.dy, curr.dx, curr.dy);
+    }
+
+    final fill = Path.from(path)
+      ..lineTo(points.last.dx, top + chartH)
+      ..lineTo(points.first.dx, top + chartH)
+      ..close();
+
+    canvas.drawPath(
+      fill,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            kAccentBlue.withValues(alpha: 0.22),
+            kAccentBlue.withValues(alpha: 0.0),
+          ],
+        ).createShader(Rect.fromLTWH(left, top, chartW, chartH)),
+    );
+
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = kAccentBlue
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3
+        ..strokeCap = StrokeCap.round,
+    );
+
+    for (final p in points) {
+      canvas.drawCircle(p, 4.2, Paint()..color = Colors.white);
+      canvas.drawCircle(p, 2.4, Paint()..color = kAccentBlue);
+    }
+
+    for (int i = 0; i < days.length; i += 3) {
+      textPainter.text = TextSpan(
+        text: DateFormat('E').format(days[i].date),
+        style: const TextStyle(color: kTextMuted, fontSize: 10),
+      );
+      textPainter.layout();
+      final x = left + (i / (days.length - 1)) * chartW;
+      textPainter.paint(canvas, Offset(x - 8, size.height - 16));
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _LineChartPainter oldDelegate) => true;
+}
+
+class _BarChart extends StatelessWidget {
+  final List<_SleepDay> days;
+
+  const _BarChart({required this.days});
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      painter: _BarChartPainter(days: days),
+      size: Size.infinite,
+    );
+  }
+}
+
+class _BarChartPainter extends CustomPainter {
+  final List<_SleepDay> days;
+
+  _BarChartPainter({required this.days});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const bottom = 24.0;
+    const top = 12.0;
+    final chartH = size.height - top - bottom;
+    final barW = size.width / (days.length * 1.8);
+
+    final textPainter = TextPainter(textDirection: ui.TextDirection.ltr);
+
+    for (int i = 0; i < days.length; i++) {
+      final d = days[i];
+      final x = (i + 0.45) * (size.width / days.length);
+      final h = (d.hours.clamp(0, 10) / 10) * chartH;
+      final rect = RRect.fromRectAndRadius(
+        Rect.fromLTWH(x, top + chartH - h, barW, h),
+        const Radius.circular(999),
+      );
+
+      final color = d.hours >= 7
+          ? const Color(0xFF22C55E)
+          : d.hours >= 6
+          ? const Color(0xFFF59E0B)
+          : d.hours == 0
+          ? Colors.white24
+          : const Color(0xFFF97316);
+
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(x, top, barW, chartH),
+          const Radius.circular(999),
+        ),
+        Paint()..color = Colors.white.withValues(alpha: 0.06),
+      );
+
+      canvas.drawRRect(
+        rect,
+        Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [color, color.withValues(alpha: 0.35)],
+          ).createShader(rect.outerRect),
+      );
+
+      textPainter.text = TextSpan(
+        text: DateFormat('E').format(d.date).substring(0, 1),
+        style: const TextStyle(color: kTextMuted, fontSize: 10),
+      );
+      textPainter.layout();
+      textPainter.paint(canvas, Offset(x + barW / 2 - 4, size.height - 14));
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _BarChartPainter oldDelegate) => true;
+}
+
+class _HeatMap extends StatelessWidget {
+  final List<_SleepDay> days;
+
+  const _HeatMap({required this.days});
+
+  @override
+  Widget build(BuildContext context) {
+    final shownDays = days.take(28).toList();
+
+    return LayoutBuilder(
+      builder: (_, constraints) {
+        const columns = 7;
+        const rows = 4;
+        const gap = 8.0;
+
+        final cellW = (constraints.maxWidth - (columns - 1) * gap) / columns;
+        final cellH = (constraints.maxHeight - (rows - 1) * gap) / rows;
+        final cell = math.min(cellW, cellH);
+
+        return Align(
+          alignment: Alignment.topLeft,
+          child: Wrap(
+            spacing: gap,
+            runSpacing: gap,
+            children: shownDays.map((d) {
+              final color = d.hours == 0
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : d.hours >= 7 && d.hours <= 8.5
+                  ? const Color(0xFF22C55E)
+                  : d.hours >= 6
+                  ? const Color(0xFFF59E0B)
+                  : const Color(0xFFF97316);
+
+              return Container(
+                width: cell,
+                height: cell,
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.08),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _BestWorstCard extends StatelessWidget {
+  final List<_SleepDay> days;
+
+  const _BestWorstCard({required this.days});
+
+  @override
+  Widget build(BuildContext context) {
+    final valid = days.where((d) => d.hours > 0).toList();
+
+    if (valid.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(18),
+        decoration: glassCardDecoration,
+        child: const Text(
+          'Best and worst nights will appear after more tracking.',
+          style: TextStyle(color: kTextSecondary),
+        ),
+      );
+    }
+
+    double distanceFromTarget(_SleepDay d) {
+      const target = 7.5;
+      return (d.hours - target).abs();
+    }
+
+    valid.sort((a, b) {
+      final aDistance = distanceFromTarget(a);
+      final bDistance = distanceFromTarget(b);
+      return aDistance.compareTo(bDistance);
+    });
+
+    final best = valid.first;
+    final worst = valid.last;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: glassCardDecoration,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Best / worst nights',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w900,
+              fontSize: 16,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Closest and farthest from your sleep target',
+            style: TextStyle(color: kTextMuted, fontSize: 12),
+          ),
+          const SizedBox(height: 18),
+          _row(
+            'Best',
+            best,
+            const Color(0xFF22C55E),
+            Icons.emoji_events_rounded,
+          ),
+          const SizedBox(height: 12),
+          _row(
+            'Lowest',
+            worst,
+            const Color(0xFFF97316),
+            Icons.warning_amber_rounded,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _row(String label, _SleepDay day, Color color, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.055),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              '$label · ${DateFormat('MMM d').format(day.date)}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          Text(
+            '${day.hours.toStringAsFixed(1)} h',
+            style: TextStyle(color: color, fontWeight: FontWeight.w900),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _RecommendationSheet extends StatelessWidget {
@@ -902,9 +1350,9 @@ class _RecommendationSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF120018),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      decoration: const BoxDecoration(
+        color: Color(0xFF120018),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
       child: Column(
@@ -922,18 +1370,9 @@ class _RecommendationSheet extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-
           Row(
             children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: rec.color.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(rec.icon, color: rec.color),
-              ),
+              Icon(rec.icon, color: rec.color, size: 32),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
@@ -941,15 +1380,13 @@ class _RecommendationSheet extends StatelessWidget {
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 18,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
               ),
             ],
           ),
-
           const SizedBox(height: 18),
-
           Text(
             _explanation(rec),
             style: const TextStyle(
@@ -958,19 +1395,12 @@ class _RecommendationSheet extends StatelessWidget {
               height: 1.5,
             ),
           ),
-
           const SizedBox(height: 20),
-
           const Text(
-            "What you can do",
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w700,
-            ),
+            'What you can do',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
           ),
-
           const SizedBox(height: 10),
-
           ..._actions(rec).map(
             (a) => Padding(
               padding: const EdgeInsets.only(bottom: 8),
@@ -994,50 +1424,108 @@ class _RecommendationSheet extends StatelessWidget {
   }
 
   String _explanation(_Recommendation rec) {
-    if (rec.title.contains("sleep time")) {
-      return "Sleeping less than your body needs affects recovery, focus, and long-term health. Even small increases in duration can significantly improve how you feel.";
+    if (rec.title.contains('Increase')) {
+      return 'Sleep duration is one of the strongest levers in your current profile. A small increase repeated over several nights can improve the weekly average quickly.';
     }
 
-    if (rec.title.contains("Track more")) {
-      return "SleepWell relies on data to detect patterns. The more nights you track, the more accurate and personalized your insights become.";
+    if (rec.title.contains('Track')) {
+      return 'SleepWell becomes more useful when it sees enough nights. More data means better trends, stronger averages, and more accurate recommendations.';
     }
 
-    if (rec.title.contains("weekday sleep debt")) {
-      return "Large differences between weekday and weekend sleep often indicate accumulated fatigue. This can disrupt your natural rhythm.";
+    if (rec.title.contains('weekday')) {
+      return 'A large weekday/weekend gap often means you are recovering on weekends instead of sleeping enough during the week.';
     }
 
-    return "Improving this area can help stabilize your sleep patterns and improve overall sleep quality.";
+    return 'Your sleep rhythm looks stable. The goal now is preserving the routine and watching for changes.';
   }
 
   List<String> _actions(_Recommendation rec) {
-    if (rec.title.contains("sleep time")) {
+    if (rec.title.contains('Increase')) {
       return [
-        "Go to bed 30 minutes earlier",
-        "Avoid screens before sleep",
-        "Keep a consistent wake time",
+        'Move bedtime 30 minutes earlier',
+        'Avoid screens close to sleep',
+        'Keep wake time consistent',
       ];
     }
 
-    if (rec.title.contains("Track more")) {
+    if (rec.title.contains('Track')) {
       return [
-        "Log sleep every morning",
-        "Use smartwatch import if available",
-        "Avoid skipping nights",
+        'Log sleep every morning',
+        'Use smartwatch import when available',
+        'Avoid skipping nights',
       ];
     }
 
-    if (rec.title.contains("weekday sleep debt")) {
+    if (rec.title.contains('weekday')) {
       return [
-        "Try to match weekend and weekday sleep",
-        "Avoid late-night shifts on weekdays",
-        "Keep bedtime consistent",
+        'Bring weekday sleep closer to weekend sleep',
+        'Avoid late weekday shifts',
+        'Protect a fixed wind-down time',
       ];
     }
 
     return [
-      "Maintain a consistent routine",
-      "Track your sleep regularly",
-      "Monitor changes over time",
+      'Keep your bedtime stable',
+      'Continue tracking',
+      'Watch for sudden drops',
     ];
   }
+}
+
+class _SleepRecord {
+  final DateTime start;
+  final DateTime end;
+  final double durationHours;
+  final String source;
+
+  const _SleepRecord({
+    required this.start,
+    required this.end,
+    required this.durationHours,
+    required this.source,
+  });
+}
+
+class _SleepDay {
+  final DateTime date;
+  final double hours;
+
+  const _SleepDay({required this.date, required this.hours});
+}
+
+class _InsightItem {
+  final IconData icon;
+  final String title;
+  final String body;
+  final Color color;
+
+  const _InsightItem({
+    required this.icon,
+    required this.title,
+    required this.body,
+    required this.color,
+  });
+}
+
+class _Recommendation {
+  final String title;
+  final String body;
+  final Color color;
+  final IconData icon;
+
+  const _Recommendation({
+    required this.title,
+    required this.body,
+    required this.color,
+    required this.icon,
+  });
+}
+
+class _Metric {
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color color;
+
+  const _Metric(this.label, this.value, this.icon, this.color);
 }

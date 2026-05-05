@@ -31,35 +31,37 @@ class _DayInsightsScreenState extends State<DayInsightsScreen> {
   Future<void> _loadDaySessions() async {
     if (_user == null) return;
 
-    final startOfDay =
-        DateTime(widget.date.year, widget.date.month, widget.date.day);
+    final startOfDay = DateTime(
+      widget.date.year,
+      widget.date.month,
+      widget.date.day,
+    );
     final endOfDay = startOfDay.add(const Duration(days: 1));
 
     final snapshot = await _firestore
         .collection('users')
-        .doc(_user!.uid)
+        .doc(_user.uid)
         .collection('sleep_records')
         .where('start', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
         .where('start', isLessThan: Timestamp.fromDate(endOfDay))
         .orderBy('start')
         .get();
 
-    final sessions = snapshot.docs.map((doc) {
-      final data = doc.data();
-      final start = (data['start'] as Timestamp?)?.toDate();
-      final end = (data['end'] as Timestamp?)?.toDate();
+    final sessions = snapshot.docs
+        .map((doc) {
+          final data = doc.data();
+          final start = (data['start'] as Timestamp?)?.toDate();
+          final end = (data['end'] as Timestamp?)?.toDate();
 
-      double duration = 0;
-      if (start != null && end != null && end.isAfter(start)) {
-        duration = end.difference(start).inMinutes / 60.0;
-      }
+          double duration = 0;
+          if (start != null && end != null && end.isAfter(start)) {
+            duration = end.difference(start).inMinutes / 60.0;
+          }
 
-      return {
-        'start': start,
-        'end': end,
-        'duration': duration,
-      };
-    }).where((s) => (s['duration'] as double) > 0).toList();
+          return {'start': start, 'end': end, 'duration': duration};
+        })
+        .where((s) => (s['duration'] as double) > 0)
+        .toList();
 
     setState(() {
       _sessions = sessions;
@@ -67,8 +69,7 @@ class _DayInsightsScreenState extends State<DayInsightsScreen> {
     });
   }
 
-  String _fmt(DateTime? t) =>
-      t == null ? '—' : DateFormat('h:mm a').format(t);
+  String _fmt(DateTime? t) => t == null ? '—' : DateFormat('h:mm a').format(t);
 
   @override
   Widget build(BuildContext context) {
@@ -85,9 +86,7 @@ class _DayInsightsScreenState extends State<DayInsightsScreen> {
         ),
         child: SafeArea(
           child: _loading
-              ? const Center(
-                  child: CircularProgressIndicator(color: kBrand),
-                )
+              ? const Center(child: CircularProgressIndicator(color: kBrand))
               : ListView(
                   padding: const EdgeInsets.all(20),
                   children: [
@@ -106,7 +105,7 @@ class _DayInsightsScreenState extends State<DayInsightsScreen> {
                     ),
                     const SizedBox(height: 20),
 
-                    ..._sessions.map(_buildSessionCard).toList(),
+                    ..._sessions.map(_buildSessionCard),
                   ],
                 ),
         ),

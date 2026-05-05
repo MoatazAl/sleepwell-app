@@ -17,7 +17,6 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   final _firestore = FirebaseFirestore.instance;
   final _auth = FirebaseAuth.instance;
-  final _authService = AuthService();
 
   final _nameController = TextEditingController();
   final _ageController = TextEditingController();
@@ -34,12 +33,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _hcPermissionGranted = false;
 
   static const List<_ScheduleOption> _scheduleOptions = [
-  _ScheduleOption('regular_daytime', 'Regular daytime schedule'),
-  _ScheduleOption('student', 'Student schedule'),
-  _ScheduleOption('shift_worker', 'Shift worker'),
-  _ScheduleOption('flexible', 'Flexible / variable schedule'),
-  _ScheduleOption('night_oriented', 'Night-oriented schedule'),
-];
+    _ScheduleOption('regular_daytime', 'Regular daytime schedule'),
+    _ScheduleOption('student', 'Student schedule'),
+    _ScheduleOption('shift_worker', 'Shift worker'),
+    _ScheduleOption('flexible', 'Flexible / variable schedule'),
+    _ScheduleOption('night_oriented', 'Night-oriented schedule'),
+  ];
   @override
   void initState() {
     super.initState();
@@ -170,7 +169,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (_sleepGoalController.text.trim().isNotEmpty &&
         (sleepGoal == null || sleepGoal <= 0 || sleepGoal > 24)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Sleep goal must be a valid number of hours.')),
+        const SnackBar(
+          content: Text('Sleep goal must be a valid number of hours.'),
+        ),
       );
       return;
     }
@@ -221,24 +222,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (mounted) setState(() {});
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Health Connect error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Health Connect error: $e')));
       }
     }
   }
 
   Future<void> _signOut() async {
-  try {
-    await AuthService.logout();
-  } catch (e) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Sign out failed: $e')),
-      );
+    try {
+      await AuthService.logout();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Sign out failed: $e')));
+      }
     }
   }
-}
 
   String _scheduleLabel(String value) {
     return _scheduleOptions
@@ -385,7 +386,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
-            value: _scheduleType,
+            initialValue: _scheduleType,
             dropdownColor: const Color(0xFF1C0A24),
             style: const TextStyle(color: Colors.white),
             decoration: _inputDecoration('Schedule type'),
@@ -630,7 +631,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: const TextStyle(color: kTextMuted, fontSize: 12)),
+            Text(
+              label,
+              style: const TextStyle(color: kTextMuted, fontSize: 12),
+            ),
             const SizedBox(height: 6),
             Text(
               value,
@@ -717,11 +721,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       child: Text(
         text,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 13,
-          height: 1.4,
-        ),
+        style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.4),
       ),
     );
   }

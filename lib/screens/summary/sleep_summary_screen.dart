@@ -9,6 +9,7 @@ import '../../widgets/app_navbar.dart';
 import '../history/sleep_history_screen.dart';
 import '../../services/health_connect/health_connect_service.dart';
 import '../../services/health_connect/health_connect_importer.dart';
+import '../insights/sleep_stage_detail_screen.dart';
 
 class SleepSummaryScreen extends StatefulWidget {
   const SleepSummaryScreen({super.key});
@@ -53,11 +54,31 @@ class _SleepSummaryScreenState extends State<SleepSummaryScreen> {
     await _initHealthConnect();
   }
 
+  void _openSleepStageDetails({
+    required String stageKey,
+    required String stageLabel,
+    required Color stageColor,
+    required double minutes,
+    required Map<String, double> totals,
+  }) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SleepStageDetailScreen(
+          stageKey: stageKey,
+          stageLabel: stageLabel,
+          stageColor: stageColor,
+          minutes: minutes,
+          totals: totals,
+        ),
+      ),
+    );
+  }
+
   Widget _buildSleepStagesCard(List<_SleepStage> stages) {
     final totals = _stageTotals(stages);
     final totalMinutes = totals.values.fold<double>(
-      0,
-      (sum, value) => sum + value,
+      0.0,
+      (total, value) => total + value,
     );
 
     if (totalMinutes <= 0) return const SizedBox.shrink();
@@ -71,7 +92,7 @@ class _SleepSummaryScreenState extends State<SleepSummaryScreen> {
     ];
 
     final visible = orderedStages
-        .where((item) => (totals[item.$1] ?? 0) > 0)
+        .where((item) => (totals[item.$1] ?? 0.0) > 0)
         .toList();
 
     return Column(
@@ -92,12 +113,24 @@ class _SleepSummaryScreenState extends State<SleepSummaryScreen> {
             height: 14,
             child: Row(
               children: visible.map((item) {
-                final minutes = totals[item.$1] ?? 0;
+                final key = item.$1;
+                final color = item.$2;
+                final label = item.$3;
+                final minutes = totals[key] ?? 0.0;
                 final fraction = minutes / totalMinutes;
 
                 return Expanded(
                   flex: (fraction * 1000).round().clamp(1, 1000),
-                  child: Container(color: item.$2),
+                  child: InkWell(
+                    onTap: () => _openSleepStageDetails(
+                      stageKey: key,
+                      stageLabel: label,
+                      stageColor: color,
+                      minutes: minutes,
+                      totals: totals,
+                    ),
+                    child: Container(color: color),
+                  ),
                 );
               }).toList(),
             ),
@@ -108,15 +141,66 @@ class _SleepSummaryScreenState extends State<SleepSummaryScreen> {
           spacing: 10,
           runSpacing: 10,
           children: visible.map((item) {
-            final minutes = totals[item.$1] ?? 0;
-            return _stageLegendChip(
-              color: item.$2,
-              label: item.$3,
-              minutes: minutes,
+            final key = item.$1;
+            final color = item.$2;
+            final label = item.$3;
+            final minutes = totals[key] ?? 0.0;
+
+            return Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(999),
+                onTap: () => _openSleepStageDetails(
+                  stageKey: key,
+                  stageLabel: label,
+                  stageColor: color,
+                  minutes: minutes,
+                  totals: totals,
+                ),
+                child: _stageLegendChip(
+                  color: color,
+                  label: label,
+                  minutes: minutes,
+                ),
+              ),
             );
           }).toList(),
         ),
       ],
+    );
+  }
+
+  Widget _buildTrendCard() {
+    final trend = _lastNDays(14);
+
+    return _glassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '14-Day Trend',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            _trendMessage(),
+            style: const TextStyle(
+              color: kTextSecondary,
+              fontSize: 13,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 210,
+            child: _LineChart(days: trend, goal: _sleepGoalHours),
+          ),
+        ],
+      ),
     );
   }
 
@@ -125,7 +209,7 @@ class _SleepSummaryScreenState extends State<SleepSummaryScreen> {
 
     for (final stage in stages) {
       final key = stage.stage.toLowerCase();
-      totals[key] = (totals[key] ?? 0) + stage.minutes;
+      totals[key] = (totals[key] ?? 0.0) + stage.minutes;
     }
 
     return totals;
@@ -196,7 +280,7 @@ class _SleepSummaryScreenState extends State<SleepSummaryScreen> {
     if (_user == null) return;
 
     try {
-      final doc = await _firestore.collection('users').doc(_user!.uid).get();
+      final doc = await _firestore.collection('users').doc(_user.uid).get();
       final data = doc.data() ?? <String, dynamic>{};
 
       _sleepGoalHours = ((data['sleepGoalHours'] as num?)?.toDouble() ?? 8.0)
@@ -262,7 +346,7 @@ class _SleepSummaryScreenState extends State<SleepSummaryScreen> {
 
     final snap = await _firestore
         .collection('users')
-        .doc(_user!.uid)
+        .doc(_user.uid)
         .collection('sleep_records')
         .orderBy('start', descending: true)
         .limit(120)
@@ -368,38 +452,38 @@ class _SleepSummaryScreenState extends State<SleepSummaryScreen> {
   }
 
   String _scheduleTypeLabel() {
-  switch (_scheduleType) {
-    case 'regular_daytime':
-      return 'regular daytime';
-    case 'night_shift':
-      return 'night shift';
-    case 'rotating_shift':
-      return 'rotating shift';
-    case 'student_irregular':
-      return 'student irregular';
-    default:
-      return 'personal';
+    switch (_scheduleType) {
+      case 'regular_daytime':
+        return 'regular daytime';
+      case 'night_shift':
+        return 'night shift';
+      case 'rotating_shift':
+        return 'rotating shift';
+      case 'student_irregular':
+        return 'student irregular';
+      default:
+        return 'personal';
+    }
   }
-}
 
   String _scoreDescription() {
-  if (_avg7 == 0) {
-    return 'Record a few nights to unlock a personalized sleep score for your ${_scheduleTypeLabel()} routine and ${_sleepGoalHours.toStringAsFixed(1)}h goal.';
+    if (_avg7 == 0) {
+      return 'Record a few nights to unlock a personalized sleep score for your ${_scheduleTypeLabel()} routine and ${_sleepGoalHours.toStringAsFixed(1)}h goal.';
+    }
+
+    final diff = _sleepGoalHours - _avg7;
+    final schedule = _scheduleTypeLabel();
+
+    if (diff <= 0.2) {
+      return 'You are sleeping close to your ${_sleepGoalHours.toStringAsFixed(1)}h goal. For a $schedule schedule, the priority now is keeping that routine consistent.';
+    }
+
+    if (diff <= 1.0) {
+      return 'You are slightly below your ${_sleepGoalHours.toStringAsFixed(1)}h goal. For a $schedule schedule, a bit more sleep and steadier timing could improve your score.';
+    }
+
+    return 'You are clearly below your ${_sleepGoalHours.toStringAsFixed(1)}h goal. For a $schedule schedule, your next focus should be increasing sleep duration and protecting your routine.';
   }
-
-  final diff = _sleepGoalHours - _avg7;
-  final schedule = _scheduleTypeLabel();
-
-  if (diff <= 0.2) {
-    return 'You are sleeping close to your ${_sleepGoalHours.toStringAsFixed(1)}h goal. For a $schedule schedule, the priority now is keeping that routine consistent.';
-  }
-
-  if (diff <= 1.0) {
-    return 'You are slightly below your ${_sleepGoalHours.toStringAsFixed(1)}h goal. For a $schedule schedule, a bit more sleep and steadier timing could improve your score.';
-  }
-
-  return 'You are clearly below your ${_sleepGoalHours.toStringAsFixed(1)}h goal. For a $schedule schedule, your next focus should be increasing sleep duration and protecting your routine.';
-}
 
   String _routineLabel() {
     if (_daysWithSleep30 >= 25) return 'Very consistent';
@@ -461,6 +545,7 @@ class _SleepSummaryScreenState extends State<SleepSummaryScreen> {
     });
   }
 
+  // ignore: unused_element
   _DayHours? _bestRecentNight() {
     final days = _lastNDays(14).where((d) => d.hours > 0).toList();
     if (days.isEmpty) return null;
@@ -468,6 +553,7 @@ class _SleepSummaryScreenState extends State<SleepSummaryScreen> {
     return days.first;
   }
 
+  // ignore: unused_element
   _DayHours? _worstRecentNight() {
     final days = _lastNDays(14).where((d) => d.hours > 0).toList();
     if (days.isEmpty) return null;
@@ -486,7 +572,7 @@ class _SleepSummaryScreenState extends State<SleepSummaryScreen> {
         .toList();
 
     if (days.isEmpty) return 0.0;
-    return days.fold(0.0, (sum, d) => sum + d.hours) / days.length;
+    return days.fold(0.0, (total, d) => total + d.hours) / days.length;
   }
 
   double _weekendAverage() {
@@ -500,7 +586,7 @@ class _SleepSummaryScreenState extends State<SleepSummaryScreen> {
         .toList();
 
     if (days.isEmpty) return 0.0;
-    return days.fold(0.0, (sum, d) => sum + d.hours) / days.length;
+    return days.fold(0.0, (total, d) => total + d.hours) / days.length;
   }
 
   List<double> _weekdayPattern() {
@@ -664,9 +750,6 @@ class _SleepSummaryScreenState extends State<SleepSummaryScreen> {
   @override
   Widget build(BuildContext context) {
     final score = _sleepScore();
-    final isWide = MediaQuery.of(context).size.width >= 900;
-    final best = _bestRecentNight();
-    final worst = _worstRecentNight();
 
     return Scaffold(
       appBar: const AppNavBar(current: NavSection.summary),
@@ -690,17 +773,7 @@ class _SleepSummaryScreenState extends State<SleepSummaryScreen> {
                       const SizedBox(height: 18),
                       _buildInsightsStrip(),
                       const SizedBox(height: 18),
-                      _buildChartsSection(isWide),
-                      const SizedBox(height: 18),
-                      _buildTopStats(),
-                      const SizedBox(height: 18),
-                      _buildBestWorstSection(best, worst, isWide),
-                      const SizedBox(height: 18),
-                      _buildWeekdayPatternCard(),
-                      const SizedBox(height: 18),
-                      _buildRoutineCard(),
-                      const SizedBox(height: 18),
-                      _buildHeatmapCard(),
+                      _buildTrendCard(),
                       const SizedBox(height: 18),
                       _buildHistoryLink(),
                     ],
@@ -1126,6 +1199,7 @@ class _SleepSummaryScreenState extends State<SleepSummaryScreen> {
     );
   }
 
+  // ignore: unused_element
   Widget _buildChartsSection(bool isWide) {
     final bars = _lastNDays(7);
     final trend = _lastNDays(14);
@@ -1202,6 +1276,7 @@ class _SleepSummaryScreenState extends State<SleepSummaryScreen> {
     return Column(children: [barCard, const SizedBox(height: 12), lineCard]);
   }
 
+  // ignore: unused_element
   Widget _buildTopStats() {
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -1293,6 +1368,7 @@ class _SleepSummaryScreenState extends State<SleepSummaryScreen> {
     );
   }
 
+  // ignore: unused_element
   Widget _buildBestWorstSection(
     _DayHours? best,
     _DayHours? worst,
@@ -1394,6 +1470,7 @@ class _SleepSummaryScreenState extends State<SleepSummaryScreen> {
     );
   }
 
+  // ignore: unused_element
   Widget _buildWeekdayPatternCard() {
     final pattern = _weekdayPattern();
     const labels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
@@ -1474,6 +1551,7 @@ class _SleepSummaryScreenState extends State<SleepSummaryScreen> {
     );
   }
 
+  // ignore: unused_element
   Widget _buildRoutineCard() {
     return _glassCard(
       child: Column(
@@ -1519,6 +1597,7 @@ class _SleepSummaryScreenState extends State<SleepSummaryScreen> {
     );
   }
 
+  // ignore: unused_element
   Widget _buildHeatmapCard() {
     return _glassCard(
       child: Column(
@@ -1860,7 +1939,7 @@ class _BarChart extends StatelessWidget {
   Widget build(BuildContext context) {
     final maxHours = math.max(
       math.max(9.0, goal),
-      days.fold<double>(0, (max, d) => d.hours > max ? d.hours : max),
+      days.fold<double>(0.0, (max, d) => d.hours > max ? d.hours : max),
     );
 
     final validDays = days.where((d) => d.hours > 0).toList();
@@ -1873,7 +1952,7 @@ class _BarChart extends StatelessWidget {
 
     final avg = validDays.isEmpty
         ? 0.0
-        : validDays.fold(0.0, (sum, d) => sum + d.hours) / validDays.length;
+        : validDays.fold(0.0, (total, d) => total + d.hours) / validDays.length;
 
     return Column(
       children: [
@@ -2069,7 +2148,7 @@ class _LineChartPainter extends CustomPainter {
 
     final maxHours = math.max(
       math.max(9.0, goal),
-      days.fold<double>(0, (max, d) => d.hours > max ? d.hours : max),
+      days.fold<double>(0.0, (max, d) => d.hours > max ? d.hours : max),
     );
 
     double mapY(double value) {

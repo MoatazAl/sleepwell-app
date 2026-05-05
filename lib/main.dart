@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:provider/provider.dart';
 import 'screens/insights/insights_screen.dart';
 
 // Firebase options
@@ -11,27 +10,19 @@ import 'firebase_options.dart';
 import 'theme.dart';
 
 // Screens
+import 'screens/ai_coach/ai_coach_screen.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/tracker/sleep_tracker_screen.dart';
 import 'screens/summary/sleep_summary_screen.dart';
+import 'screens/history/sleep_history_screen.dart';
+import 'screens/sleep_sounds/sleep_sounds_screen.dart';
 import 'screens/settings/settings_screen.dart';
-
-// Controllers
-import 'services/tracking/tracking_controller.dart';
-
-// Auto sleep tracking (OUR NEW PART)
-import 'services/sleep_detection/auto_sleep_controller.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
-
-  // 👉 Initialize auto sleep detection before running the app
-  AutoSleepController().init();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   runApp(const SleepWellApp());
 }
@@ -41,28 +32,23 @@ class SleepWellApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MultiProvider(
-      providers: [
-        ChangeNotifierProvider(
-          create: (_) => TrackingController(),
-        ),
-      ],
-      child: MaterialApp(
-        title: 'SleepWell',
-        debugShowCheckedModeBanner: false,
-        theme: appTheme,
+    return MaterialApp(
+      title: 'SleepWell',
+      debugShowCheckedModeBanner: false,
+      theme: appTheme,
 
-        initialRoute: '/',
-        routes: {
-          '/': (context) => const AuthGate(),
-          '/home': (context) => const HomeScreen(),
-          '/tracker': (context) => const SleepTrackerScreen(),
-          '/summary': (context) => const SleepSummaryScreen(),
-          '/settings': (context) => const SettingsScreen(),
-          '/insights': (_) => const InsightsScreen(),
-
-        },
-      ),
+      initialRoute: '/',
+      routes: {
+        '/': (context) => const AuthGate(),
+        '/home': (context) => const HomeScreen(),
+        '/tracker': (context) => const SleepTrackerScreen(),
+        '/summary': (context) => const SleepSummaryScreen(),
+        '/history': (context) => const SleepHistoryScreen(),
+        '/sounds': (context) => const SleepSoundsScreen(),
+        '/ai-coach': (context) => const AiCoachScreen(),
+        '/settings': (context) => const SettingsScreen(),
+        '/insights': (_) => const InsightsScreen(),
+      },
     );
   }
 }

@@ -58,6 +58,7 @@ class _EditSleepEntryScreenState extends State<EditSleepEntryScreen> {
                   'note': updated.note,
                 });
 
+                if (!context.mounted) return;
                 Navigator.pop(context);
               },
               child: const Text("Save"),

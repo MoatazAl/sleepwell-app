@@ -44,6 +44,7 @@ class _ManualSleepEntryScreenState extends State<ManualSleepEntryScreen> {
     );
     if (pickedDate == null) return;
 
+    if (!mounted) return;
     final pickedTime = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.fromDateTime(initial),
@@ -105,16 +106,18 @@ class _ManualSleepEntryScreenState extends State<ManualSleepEntryScreen> {
       Navigator.pop(context, true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error saving session: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error saving session: $e')));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
   String _durationText() {
-    if (_startTime == null || _endTime == null || _endTime!.isBefore(_startTime!)) {
+    if (_startTime == null ||
+        _endTime == null ||
+        _endTime!.isBefore(_startTime!)) {
       return 'Choose a valid start and end time.';
     }
 
@@ -160,10 +163,7 @@ class _ManualSleepEntryScreenState extends State<ManualSleepEntryScreen> {
                       const SizedBox(height: 10),
                       const Text(
                         'Use this when you forgot to track a night or want to correct a previous entry.',
-                        style: TextStyle(
-                          color: kTextSecondary,
-                          height: 1.45,
-                        ),
+                        style: TextStyle(color: kTextSecondary, height: 1.45),
                       ),
                     ],
                   ),
@@ -179,7 +179,9 @@ class _ManualSleepEntryScreenState extends State<ManualSleepEntryScreen> {
                         icon: Icons.bedtime_rounded,
                         label: _startTime == null
                             ? 'Select start'
-                            : DateFormat('EEE, MMM d • h:mm a').format(_startTime!),
+                            : DateFormat(
+                                'EEE, MMM d • h:mm a',
+                              ).format(_startTime!),
                         accent: kBrand,
                         onTap: () => _pickDateTime(true),
                       ),
@@ -190,7 +192,9 @@ class _ManualSleepEntryScreenState extends State<ManualSleepEntryScreen> {
                         icon: Icons.wb_sunny_outlined,
                         label: _endTime == null
                             ? 'Select end'
-                            : DateFormat('EEE, MMM d • h:mm a').format(_endTime!),
+                            : DateFormat(
+                                'EEE, MMM d • h:mm a',
+                              ).format(_endTime!),
                         accent: kAccentBlue,
                         onTap: () => _pickDateTime(false),
                       ),
@@ -248,7 +252,9 @@ class _ManualSleepEntryScreenState extends State<ManualSleepEntryScreen> {
                         width: double.infinity,
                         child: ElevatedButton.icon(
                           onPressed: _saveSession,
-                          icon: Icon(editing ? Icons.save_rounded : Icons.add_rounded),
+                          icon: Icon(
+                            editing ? Icons.save_rounded : Icons.add_rounded,
+                          ),
                           label: Text(editing ? 'Save Changes' : 'Add Session'),
                         ),
                       ),

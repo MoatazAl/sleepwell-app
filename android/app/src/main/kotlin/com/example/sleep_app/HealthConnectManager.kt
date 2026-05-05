@@ -90,4 +90,48 @@ class HealthConnectManager(private val context: Context) {
             else -> "unknown"
         }
     }
+
+    suspend fun readSleepSessions(daysBack: Long = 30): List<Map<String, Any?>> =
+        withContext(Dispatchers.IO) {
+            val end = Instant.now()
+            val start = end.minus(daysBack, ChronoUnit.DAYS)
+
+            val response = client.readRecords(
+                ReadRecordsRequest(
+                    recordType = SleepSessionRecord::class,
+                    timeRangeFilter = TimeRangeFilter.between(start, end),
+                    ascendingOrder = false,
+                    pageSize = 200
+                )
+            )
+
+            response.records
+                .filter { it.endTime.isBefore(Instant.now().plusSeconds(60)) }
+                .sortedByDescending { it.endTime }
+                .map { record ->
+                    val durationMinutes =
+                        ChronoUnit.MINUTES.between(record.startTime, record.endTime)
+                    val durationHours = durationMinutes / 60.0
+
+                    val stages = record.stages.map { stage ->
+                        mapOf(
+                            "stage" to stageTypeToLabel(stage.stage),
+                            "stageCode" to stage.stage,
+                            "start" to stage.startTime.toString(),
+                            "end" to stage.endTime.toString()
+                        )
+                    }
+
+                    mapOf(
+                        "start" to record.startTime.toString(),
+                        "end" to record.endTime.toString(),
+                        "title" to record.title,
+                        "notes" to record.notes,
+                        "sourcePackage" to record.metadata.dataOrigin.packageName,
+                        "durationHours" to durationHours,
+                        "durationMinutes" to durationMinutes,
+                        "stages" to stages
+                    )
+                }
+        }
 }

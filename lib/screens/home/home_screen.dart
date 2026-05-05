@@ -26,7 +26,6 @@ class _HomeScreenState extends State<HomeScreen> {
   double _weeklyAverage = 0.0;
   String? _bestDay;
   double? _bestDuration;
-  String? _worstDay;
   double? _worstDuration;
   int _weekCount = 0;
 
@@ -48,7 +47,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final snapshot = await _firestore
         .collection('users')
-        .doc(_user!.uid)
+        .doc(_user.uid)
         .collection('sleep_records')
         .orderBy('start', descending: true)
         .limit(60)
@@ -61,7 +60,6 @@ class _HomeScreenState extends State<HomeScreen> {
         _weeklyAverage = 0.0;
         _bestDay = null;
         _bestDuration = null;
-        _worstDay = null;
         _worstDuration = null;
         _weekCount = 0;
         _loading = false;
@@ -81,10 +79,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (duration > 14) duration = 0.0;
 
-      return {
-        'start': start,
-        'duration': duration,
-      };
+      return {'start': start, 'duration': duration};
     }).toList();
 
     final Map<String, double> dailyTotals = {};
@@ -101,14 +96,13 @@ class _HomeScreenState extends State<HomeScreen> {
       dayDates[key] = start;
     }
 
-    final recentDays = dailyTotals.entries
-        .map((e) => {
-              'date': dayDates[e.key]!,
-              'duration': e.value,
-            })
-        .toList()
-      ..sort((a, b) =>
-          (b['date'] as DateTime).compareTo(a['date'] as DateTime));
+    final recentDays =
+        dailyTotals.entries
+            .map((e) => {'date': dayDates[e.key]!, 'duration': e.value})
+            .toList()
+          ..sort(
+            (a, b) => (b['date'] as DateTime).compareTo(a['date'] as DateTime),
+          );
 
     Map<String, dynamic>? lastSleep;
     if (recentDays.isNotEmpty) {
@@ -125,13 +119,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final weeklyAverage = weekDays.isEmpty
         ? 0.0
-        : weekDays
-                .map((d) => d['duration'] as double)
-                .reduce((a, b) => a + b) /
-            weekDays.length;
+        : weekDays.map((d) => d['duration'] as double).reduce((a, b) => a + b) /
+              weekDays.length;
 
     String? bestDay;
-    String? worstDay;
     double bestDur = -1;
     double worstDur = double.infinity;
 
@@ -145,7 +136,6 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       if (dur < worstDur) {
         worstDur = dur;
-        worstDay = label;
       }
     }
 
@@ -154,7 +144,6 @@ class _HomeScreenState extends State<HomeScreen> {
       _recentDays = recentDays.take(5).toList();
       _weeklyAverage = weeklyAverage;
       _bestDay = bestDay;
-      _worstDay = worstDay;
       _bestDuration = bestDur > 0 ? bestDur : null;
       _worstDuration = worstDur < double.infinity ? worstDur : null;
       _weekCount = weekDays.length;
@@ -302,6 +291,10 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  void _openAiCoach() {
+    Navigator.pushNamed(context, '/ai-coach');
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -314,15 +307,15 @@ class _HomeScreenState extends State<HomeScreen> {
             color: kBrand,
             onRefresh: _loadSleepData,
             child: _loading
-                ? const Center(
-                    child: CircularProgressIndicator(color: kBrand),
-                  )
+                ? const Center(child: CircularProgressIndicator(color: kBrand))
                 : ListView(
                     padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
                     children: [
                       _buildHeroSection(),
                       const SizedBox(height: 18),
                       _buildPrimaryActions(),
+                      const SizedBox(height: 18),
+                      _buildAiCoachCard(),
                       const SizedBox(height: 18),
                       _buildHowItHelps(),
                       const SizedBox(height: 18),
@@ -353,6 +346,111 @@ class _HomeScreenState extends State<HomeScreen> {
       padding: padding,
       decoration: glassCardDecoration,
       child: child,
+    );
+  }
+
+  Widget _buildAiCoachCard() {
+    return InkWell(
+      borderRadius: BorderRadius.circular(24),
+      onTap: _openAiCoach,
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(24),
+          gradient: LinearGradient(
+            colors: [
+              kBrand.withValues(alpha: 0.22),
+              const Color(0xFF132033).withValues(alpha: 0.64),
+              kAccentBlue.withValues(alpha: 0.10),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+          boxShadow: [
+            BoxShadow(
+              color: kBrand.withValues(alpha: 0.18),
+              blurRadius: 26,
+              offset: const Offset(0, 14),
+            ),
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.24),
+              blurRadius: 20,
+              offset: const Offset(0, 10),
+            ),
+          ],
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 54,
+              height: 54,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(18),
+                gradient: const LinearGradient(
+                  colors: [kAccentBlue, kBrand],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: kAccentBlue.withValues(alpha: 0.18),
+                    blurRadius: 22,
+                  ),
+                ],
+              ),
+              child: const Icon(
+                Icons.psychology_alt_rounded,
+                color: Colors.white,
+                size: 28,
+              ),
+            ),
+            const SizedBox(width: 15),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'AI Sleep Coach',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  SizedBox(height: 6),
+                  Text(
+                    'Generate a weekly sleep report from your sleep history and assessments.',
+                    style: TextStyle(
+                      color: kTextSecondary,
+                      fontSize: 13,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+              ),
+              child: const Text(
+                'Open Coach',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -469,7 +567,7 @@ class _HomeScreenState extends State<HomeScreen> {
               _HelpItem(
                 icon: Icons.schedule_rounded,
                 title: 'Track sleep',
-                subtitle: 'Log nights automatically or manually.',
+                subtitle: 'Log nights manually or import watch sleep.',
               ),
               _HelpItem(
                 icon: Icons.insights_rounded,
@@ -508,9 +606,7 @@ class _HomeScreenState extends State<HomeScreen> {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(18),
                 color: Colors.white.withValues(alpha: 0.04),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.06),
-                ),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
               ),
               child: const Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -520,10 +616,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   Expanded(
                     child: Text(
                       'No sleep data yet. Record your first night to unlock weekly patterns, recent history, and personalized recommendations.',
-                      style: TextStyle(
-                        color: kTextSecondary,
-                        height: 1.45,
-                      ),
+                      style: TextStyle(color: kTextSecondary, height: 1.45),
                     ),
                   ),
                 ],
@@ -552,10 +645,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 10),
           Text(
             _snapshotBody(),
-            style: const TextStyle(
-              color: kTextSecondary,
-              height: 1.45,
-            ),
+            style: const TextStyle(color: kTextSecondary, height: 1.45),
           ),
           const SizedBox(height: 16),
           Row(
@@ -574,8 +664,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: _miniMetric(
                   label: 'Weekly average',
                   value: '${_weeklyAverage.toStringAsFixed(1)}h',
-                  helper:
-                      _weekCount == 0 ? 'No nights yet' : 'Across $_weekCount night${_weekCount == 1 ? '' : 's'}',
+                  helper: _weekCount == 0
+                      ? 'No nights yet'
+                      : 'Across $_weekCount night${_weekCount == 1 ? '' : 's'}',
                 ),
               ),
             ],
@@ -632,14 +723,9 @@ class _HomeScreenState extends State<HomeScreen> {
             TextButton(
               onPressed: () => Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => const SleepHistoryScreen(),
-                ),
+                MaterialPageRoute(builder: (_) => const SleepHistoryScreen()),
               ),
-              child: const Text(
-                'View All →',
-                style: TextStyle(color: kBrand),
-              ),
+              child: const Text('View All →', style: TextStyle(color: kBrand)),
             ),
           ],
         ),
@@ -788,9 +874,7 @@ class _HomeScreenState extends State<HomeScreen> {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
         color: Colors.white.withValues(alpha: 0.05),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.06),
-        ),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -833,7 +917,10 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: const TextStyle(color: kTextMuted, fontSize: 12)),
+              Text(
+                title,
+                style: const TextStyle(color: kTextMuted, fontSize: 12),
+              ),
               const SizedBox(height: 6),
               Text(
                 value,
@@ -871,9 +958,7 @@ class _HelpItem extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
         color: Colors.white.withValues(alpha: 0.04),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.06),
-        ),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

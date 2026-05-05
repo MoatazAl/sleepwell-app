@@ -53,11 +53,7 @@ class _SignupScreenState extends State<SignupScreen> {
     'Improve overall sleep quality',
   ];
 
-  final List<String> _stressOptions = const [
-    'Low',
-    'Moderate',
-    'High',
-  ];
+  final List<String> _stressOptions = const ['Low', 'Moderate', 'High'];
 
   final List<String> _screenUseOptions = const [
     'Rarely',
@@ -151,61 +147,61 @@ class _SignupScreenState extends State<SignupScreen> {
   }
 
   DropdownButtonFormField<String> _buildDropdown({
-  required String label,
-  required IconData icon,
-  required String? value,
-  required List<String> items,
-  required ValueChanged<String?> onChanged,
-}) {
-  return DropdownButtonFormField<String>(
-    value: value,
-    dropdownColor: _fieldColor,
-    style: const TextStyle(color: _textPrimary),
-    iconEnabledColor: _textSecondary,
-    decoration: InputDecoration(
-      labelText: label,
-      labelStyle: const TextStyle(color: _textSecondary),
-      prefixIcon: Icon(icon, color: _textSecondary),
-      filled: true,
-      fillColor: _fieldColor,
-      contentPadding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: _borderColor),
+    required String label,
+    required IconData icon,
+    required String? value,
+    required List<String> items,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return DropdownButtonFormField<String>(
+      initialValue: value,
+      dropdownColor: _fieldColor,
+      style: const TextStyle(color: _textPrimary),
+      iconEnabledColor: _textSecondary,
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: const TextStyle(color: _textSecondary),
+        prefixIcon: Icon(icon, color: _textSecondary),
+        filled: true,
+        fillColor: _fieldColor,
+        contentPadding: const EdgeInsets.symmetric(
+          vertical: 18,
+          horizontal: 16,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: _borderColor),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: _primary, width: 1.4),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: Colors.redAccent),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: Colors.redAccent, width: 1.4),
+        ),
+        floatingLabelBehavior: FloatingLabelBehavior.always,
       ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: _primary, width: 1.4),
+      hint: Text(
+        'Select $label',
+        style: const TextStyle(color: _textSecondary),
       ),
-      errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Colors.redAccent),
-      ),
-      focusedErrorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Colors.redAccent, width: 1.4),
-      ),
-      floatingLabelBehavior: FloatingLabelBehavior.always,
-    ),
-    hint: Text(
-      'Select $label',
-      style: const TextStyle(color: _textSecondary),
-    ),
-    items: items
-        .map(
-          (item) => DropdownMenuItem<String>(
-            value: item,
-            child: Text(
-              item,
-              style: const TextStyle(color: _textPrimary),
+      items: items
+          .map(
+            (item) => DropdownMenuItem<String>(
+              value: item,
+              child: Text(item, style: const TextStyle(color: _textPrimary)),
             ),
-          ),
-        )
-        .toList(),
-    onChanged: onChanged,
-    validator: (v) => v == null || v.isEmpty ? 'Please select $label' : null,
-  );
-}
+          )
+          .toList(),
+      onChanged: onChanged,
+      validator: (v) => v == null || v.isEmpty ? 'Please select $label' : null,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -238,7 +234,10 @@ class _SignupScreenState extends State<SignupScreen> {
             ),
             Center(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 32),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 32,
+                ),
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 520),
                   child: ClipRRect(
@@ -397,7 +396,9 @@ class _SignupScreenState extends State<SignupScreen> {
                                     return 'Please enter your age';
                                   }
                                   final age = int.tryParse(value.trim());
-                                  if (age == null) return 'Age must be a number';
+                                  if (age == null) {
+                                    return 'Age must be a number';
+                                  }
                                   if (age < 10 || age > 100) {
                                     return 'Enter a realistic age';
                                   }
@@ -411,7 +412,8 @@ class _SignupScreenState extends State<SignupScreen> {
                                 icon: Icons.work_outline_rounded,
                                 value: _routineType,
                                 items: _routineOptions,
-                                onChanged: (v) => setState(() => _routineType = v),
+                                onChanged: (v) =>
+                                    setState(() => _routineType = v),
                               ),
                               const SizedBox(height: 16),
 
@@ -420,7 +422,8 @@ class _SignupScreenState extends State<SignupScreen> {
                                 icon: Icons.flag_outlined,
                                 value: _sleepGoal,
                                 items: _goalOptions,
-                                onChanged: (v) => setState(() => _sleepGoal = v),
+                                onChanged: (v) =>
+                                    setState(() => _sleepGoal = v),
                               ),
                               const SizedBox(height: 16),
 
@@ -429,7 +432,8 @@ class _SignupScreenState extends State<SignupScreen> {
                                 icon: Icons.psychology_alt_outlined,
                                 value: _stressLevel,
                                 items: _stressOptions,
-                                onChanged: (v) => setState(() => _stressLevel = v),
+                                onChanged: (v) =>
+                                    setState(() => _stressLevel = v),
                               ),
                               const SizedBox(height: 16),
 
@@ -438,7 +442,8 @@ class _SignupScreenState extends State<SignupScreen> {
                                 icon: Icons.phone_android_rounded,
                                 value: _screenUse,
                                 items: _screenUseOptions,
-                                onChanged: (v) => setState(() => _screenUse = v),
+                                onChanged: (v) =>
+                                    setState(() => _screenUse = v),
                               ),
                               const SizedBox(height: 16),
 
@@ -546,10 +551,7 @@ class _GlowCircle extends StatelessWidget {
   final double size;
   final Color color;
 
-  const _GlowCircle({
-    required this.size,
-    required this.color,
-  });
+  const _GlowCircle({required this.size, required this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -557,10 +559,7 @@ class _GlowCircle extends StatelessWidget {
       child: Container(
         width: size,
         height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: color,
-        ),
+        decoration: BoxDecoration(shape: BoxShape.circle, color: color),
       ),
     );
   }
